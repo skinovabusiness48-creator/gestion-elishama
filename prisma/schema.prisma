@@ -1,0 +1,161 @@
+// ELISHAMA - Restaurant Management
+// Base de données SQLite locale - 100% personnalisable, vide au premier démarrage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Catégories créées par l'utilisateur (Plats, Boissons, Accompagnements, Desserts, Ingrédients...)
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  emoji       String?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+}
+
+// Produits avec gestion de stock (ingrédients, boissons en stock, etc.)
+model Product {
+  id            String       @id @default(cuid())
+  name          String
+  categoryId    String?
+  category      Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  photo         String?
+  purchasePrice Float        @default(0)
+  salePrice     Float        @default(0)
+  quantity      Float        @default(0)
+  minStock      Float        @default(0)
+  unit          String       @default("unité")
+  description   String?
+  available     Boolean      @default(true)
+  internalCode  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  stockEntries  StockEntry[]
+  saleItems     SaleItem[]
+}
+
+// Plats du menu (Kedjenou poulet, etc.)
+model Dish {
+  id          String     @id @default(cuid())
+  name        String
+  photo       String?
+  price       Float      @default(0)
+  description String?
+  available   Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  saleItems   SaleItem[]
+}
+
+// Boissons du menu
+model Drink {
+  id          String     @id @default(cuid())
+  name        String
+  photo       String?
+  price       Float      @default(0)
+  description String?
+  available   Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  saleItems   SaleItem[]
+}
+
+// Fournisseurs (créés par l'utilisateur)
+model Supplier {
+  id           String       @id @default(cuid())
+  name         String
+  phone        String?
+  address      String?
+  description  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  stockEntries StockEntry[]
+}
+
+// Entrées de stock (réapprovisionnements)
+model StockEntry {
+  id           String    @id @default(cuid())
+  date         DateTime  @default(now())
+  productId    String?
+  product      Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName  String
+  supplierId   String?
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplierName String?
+  quantity     Float     @default(0)
+  unitPrice    Float     @default(0)
+  observation  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// Ventes (caisse)
+model Sale {
+  id          String     @id @default(cuid())
+  date        DateTime   @default(now())
+  totalAmount Float      @default(0)
+  note        String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  items       SaleItem[]
+}
+
+// Lignes de vente (produit, plat ou boisson)
+model SaleItem {
+  id        String   @id @default(cuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  itemType  String // 'product' | 'dish' | 'drink'
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  dishId    String?
+  dish      Dish?    @relation(fields: [dishId], references: [id], onDelete: SetNull)
+  drinkId   String?
+  drink     Drink?   @relation(fields: [drinkId], references: [id], onDelete: SetNull)
+  itemName  String
+  quantity  Float    @default(1)
+  unitPrice Float    @default(0)
+  total     Float    @default(0)
+}
+
+// Catégories de dépenses (créées par l'utilisateur)
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  name      String
+  emoji     String?
+  createdAt DateTime  @default(now())
+  expenses  Expense[]
+}
+
+// Dépenses
+model Expense {
+  id         String           @id @default(cuid())
+  name       String
+  amount     Float
+  date       DateTime         @default(now())
+  description String?
+  photo      String?
+  categoryId String?
+  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+// Retours clients (ce que les clients n'aiment pas)
+model CustomerFeedback {
+  id        String   @id @default(cuid())
+  itemName  String
+  itemType  String? // 'dish' | 'drink' | 'product'
+  feedback  String
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
