@@ -371,3 +371,26 @@ Stage Summary:
 - Flux doré validé : catégorie -> produit/plat -> vente -> dashboard
 - 16 modules fonctionnels, UI française, thème restaurant orange/ambre, responsive + dark mode
 - 100% personnalisable, vide au premier démarrage (aucune donnée imposée)
+
+---
+Task ID: 14
+Agent: main (orchestrator) — Support PWA + Guide installation
+Task: Rendre l'application installable (PWA) et créer le guide d'installation hors connexion
+
+Work Log:
+- Créé logo ELISHAMA SVG (carré arrondi orange gradient + "E" + ustensiles)
+- Généré icônes PNG via sharp : icon-192.png, icon-512.png, apple-icon.png, favicon-32/16.png, favicon.ico
+- Créé public/manifest.json (name, short_name, start_url /, display standalone, theme_color #f97316, icons SVG+192+512 maskable, shortcuts Tableau de bord / Nouvelle vente)
+- Créé public/sw.js (service worker) : precache shell, API network-first + fallback cache, uploads cache-first, navigation/assets stale-while-revalidate
+- Créé src/components/shared/PWARegister.tsx (enregistrement SW côté client au load)
+- Mis à jour src/app/layout.tsx : metadata.manifest, icons (ico/svg/png), appleWebApp, viewport.themeColor, import PWARegister
+- Créé GUIDE-INSTALLATION.md (prérequis Node/Bun, installation projet, lancement dev/prod, installation PWA Windows/Android/iOS, démarrage auto Windows .bat, sauvegarde, mises à jour, dépannage)
+- Créé demarrer-elishama.bat (script Windows double-clic pour lancer l'app)
+- Vérification Agent Browser : SW enregistré (1 registration, scope /), manifest lié, /sw.js /manifest.json /icon-192.png servis en 200, 0 erreur runtime
+- lint : 0 erreur, 0 warning
+
+Stage Summary:
+- Application ELISHAMA désormais installable comme PWA (icône bureau Windows, fenêtre standalone, écran d'accueil Android/iOS)
+- Fonctionnement 100% hors connexion : toutes données en SQLite local + photos locales, service worker cache le shell et les assets
+- Guide d'installation complet fourni (GUIDE-INSTALLATION.md) + script .bat de démarrage automatique Windows
+- Pour utiliser hors ligne : lancer le serveur Next sur la machine (npm run start) → ouvrir localhost:3000 → installer via navigateur
