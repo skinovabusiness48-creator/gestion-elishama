@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { downloadExcel, printHTML } from "@/lib/export";
+import { downloadExcel, downloadPDF } from "@/lib/export";
 
 /* ----------------------------- Types & config ----------------------------- */
 
@@ -179,14 +179,6 @@ function toNumeric(value: string): string | number {
   const n = Number(normalized);
   if (Number.isFinite(n) && /^-?\d+(\.\d+)?$/.test(normalized)) return n;
   return value;
-}
-
-function escapeHTML(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function buildExportURL(type: ExportType, from: string, to: string): string {
@@ -344,32 +336,24 @@ export function ExportModule() {
         toast.error("Aucune donnée à exporter pour cette période");
         return;
       }
+      const rows = parsed.rows.map((r) => r.map(toNumeric));
       const total = totalForCSV(type, parsed.headers, parsed.rows);
       const dateRangeText =
         from || to
           ? `Période : ${from || "…"} → ${to || "…"}`
           : "Période : toutes les dates";
-      const headCells = parsed.headers
-        .map((h) => `<th>${escapeHTML(h)}</th>`)
-        .join("");
-      const bodyRows = parsed.rows
-        .map((r) => `<tr>${r.map((c) => `<td>${escapeHTML(c)}</td>`).join("")}</tr>`)
-        .join("");
-      const totalRow = total
-        ? `<tr class="total"><td colspan="${parsed.headers.length - 1}">${escapeHTML(
-            total.label,
-          )}</td><td>${total.value.toLocaleString("fr-FR")} FCFA</td></tr>`
-        : "";
-      const bodyHTML = `
-        <div class="sub">${dateRangeText} · ${parsed.rows.length} ligne(s)</div>
-        <table>
-          <thead><tr>${headCells}</tr></thead>
-          <tbody>${bodyRows}${totalRow}</tbody>
-        </table>
-      `;
-      printHTML(`${titleFor(type)} — Export`, bodyHTML);
-      toast.success(`Export PDF « ${titleFor(type)} » prêt`, {
-        description: "Une fenêtre s'est ouverte pour l'impression / l'enregistrement.",
+      downloadPDF(fileBase(type), parsed.headers, rows, {
+        title: `${titleFor(type)} — Export`,
+        subtitle: `${dateRangeText} · ${parsed.rows.length} ligne(s)`,
+        total: total
+          ? {
+              label: total.label,
+              value: `${total.value.toLocaleString("fr-FR")} FCFA`,
+            }
+          : undefined,
+      });
+      toast.success(`Export PDF « ${titleFor(type)} » téléchargé`, {
+        description: `${parsed.rows.length} ligne(s) exportée(s).`,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erreur export PDF");
@@ -500,9 +484,8 @@ export function ExportModule() {
       </div>
 
       <p className="text-center text-xs text-muted-foreground">
-        Astuce : le PDF s&apos;ouvre dans une nouvelle fenêtre — utilisez « Imprimer /
-        Enregistrer en PDF » du navigateur. L&apos;Excel et le CSV sont téléchargés
-        directement.
+        Les exports PDF, Excel et CSV sont téléchargés directement sur votre
+        appareil.
       </p>
     </div>
   );

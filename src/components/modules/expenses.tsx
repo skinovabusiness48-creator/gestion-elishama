@@ -73,7 +73,7 @@ import {
 } from "@/components/ui/table";
 import { apiFetch, photoUrl } from "@/lib/api";
 import { cn, formatDate, formatMoney, toInputDate } from "@/lib/utils";
-import { downloadCSV, downloadExcel, printHTML } from "@/lib/export";
+import { downloadCSV, downloadExcel, downloadPDF } from "@/lib/export";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -380,27 +380,17 @@ export function ExpensesModule() {
       toast.info("Aucune dépense à exporter");
       return;
     }
-    const cards = `
-      <div class="grid">
-        <div class="card"><div class="l">Total dépenses</div><div class="v">${formatMoney(totalAmount)}</div></div>
-        <div class="card"><div class="l">Nombre de dépenses</div><div class="v">${count}</div></div>
-        <div class="card"><div class="l">Période</div><div class="v" style="font-size:14px">${PERIOD_LABELS[period]}</div></div>
-      </div>`;
-    const rows = items
-      .map(
-        (e) =>
-          `<tr><td>${formatDate(e.date)}</td><td>${escapeHTML(e.name)}</td><td style="text-align:right">${formatMoney(e.amount)}</td><td>${e.category ? escapeHTML(`${e.category.emoji ?? ""} ${e.category.name}`.trim()) : ""}</td><td>${escapeHTML(e.description ?? "")}</td></tr>`,
-      )
-      .join("");
-    const table = `
-      <table>
-        <thead><tr><th>Date</th><th>Libellé</th><th style="text-align:right">Montant</th><th>Catégorie</th><th>Description</th></tr></thead>
-        <tbody>
-          ${rows}
-          <tr class="total"><td colspan="2">Total</td><td style="text-align:right">${formatMoney(totalAmount)}</td><td colspan="2"></td></tr>
-        </tbody>
-      </table>`;
-    printHTML("Dépenses", cards + table);
+    downloadPDF("depenses", exportHeaders, exportRows(), {
+      title: "Dépenses",
+      subtitle: `${PERIOD_LABELS[period]} · ${count} dépense${count > 1 ? "s" : ""}`,
+      summaryCards: [
+        { label: "Total dépenses", value: formatMoney(totalAmount) },
+        { label: "Nombre de dépenses", value: String(count) },
+        { label: "Période", value: PERIOD_LABELS[period] },
+      ],
+      total: { label: "Total", value: formatMoney(totalAmount) },
+    });
+    toast.success("Export PDF « Dépenses » téléchargé");
   }
 
   /* --------------------------- Render ---------------------------- */
@@ -940,17 +930,4 @@ export function ExpensesModule() {
       </div>
     </div>
   );
-}
-
-/* ------------------------------------------------------------------ */
-/* Utils locaux                                                        */
-/* ------------------------------------------------------------------ */
-
-function escapeHTML(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }

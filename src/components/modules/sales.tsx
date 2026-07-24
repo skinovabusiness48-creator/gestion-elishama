@@ -61,7 +61,7 @@ import {
 } from "@/components/ui/table";
 import { apiFetch, photoUrl } from "@/lib/api";
 import { cn, formatMoney, formatNumber, formatDateTime } from "@/lib/utils";
-import { downloadCSV, downloadExcel, printHTML } from "@/lib/export";
+import { downloadCSV, downloadExcel, downloadPDF } from "@/lib/export";
 import { toast } from "sonner";
 
 /* ------------------------------------------------------------------ */
@@ -791,27 +791,23 @@ function HistoryPanel({ refreshKey }: HistoryPanelProps) {
       toast.info("Aucune vente à exporter");
       return;
     }
-    const cards = `
-      <div class="grid">
-        <div class="card"><div class="l">Revenu total</div><div class="v">${formatMoney(totalRevenue)}</div></div>
-        <div class="card"><div class="l">Nombre de ventes</div><div class="v">${salesCount}</div></div>
-        <div class="card"><div class="l">Panier moyen</div><div class="v">${formatMoney(avg)}</div></div>
-      </div>`;
-    const rows = sales
-      .map(
-        (s) =>
-          `<tr><td>${formatDateTime(s.date)}</td><td>${itemCount(s)}</td><td style="text-align:right">${formatMoney(s.totalAmount)}</td></tr>`,
-      )
-      .join("");
-    const table = `
-      <table>
-        <thead><tr><th>Date</th><th>Articles</th><th style="text-align:right">Total</th></tr></thead>
-        <tbody>
-          ${rows}
-          <tr class="total"><td colspan="2">Total général</td><td style="text-align:right">${formatMoney(totalRevenue)}</td></tr>
-        </tbody>
-      </table>`;
-    printHTML("Revenus — Ventes", cards + table);
+    const headers = ["Date", "Articles", "Total (FCFA)"];
+    const rows: (string | number)[][] = sales.map((s) => [
+      formatDateTime(s.date),
+      itemCount(s),
+      s.totalAmount,
+    ]);
+    downloadPDF("ventes", headers, rows, {
+      title: "Ventes",
+      subtitle: `${PERIOD_LABELS[period]} · ${salesCount} vente${salesCount > 1 ? "s" : ""}`,
+      summaryCards: [
+        { label: "Revenu total", value: formatMoney(totalRevenue) },
+        { label: "Nombre de ventes", value: String(salesCount) },
+        { label: "Panier moyen", value: formatMoney(avg) },
+      ],
+      total: { label: "Total général", value: formatMoney(totalRevenue) },
+    });
+    toast.success("Export PDF « Ventes » téléchargé");
   };
 
   return (

@@ -8,6 +8,8 @@ import {
   Plus,
   UtensilsCrossed,
   Trash2,
+  Search,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
@@ -44,6 +46,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, photoUrl } from "@/lib/api";
 import { cn, formatMoney } from "@/lib/utils";
@@ -363,6 +372,8 @@ function DishFormDialog({
 /* Module principal                                                    */
 /* ------------------------------------------------------------------ */
 
+type AvailabilityFilter = "all" | "available" | "unavailable";
+
 export function DishesModule() {
   const [items, setItems] = useState<Dish[]>([]);
   const [loading, setLoading] = useState(true);
@@ -370,6 +381,8 @@ export function DishesModule() {
   const [editing, setEditing] = useState<Dish | null>(null);
   const [deleting, setDeleting] = useState<Dish | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [availFilter, setAvailFilter] = useState<AvailabilityFilter>("all");
 
   const load = useCallback(async () => {
     try {
@@ -390,6 +403,20 @@ export function DishesModule() {
   }, [load]);
 
   const availableCount = items.filter((d) => d.available).length;
+
+  const filtered = items.filter((dish) => {
+    const matchesSearch =
+      search.trim() === "" ||
+      dish.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+      (dish.description ?? "").toLowerCase().includes(search.trim().toLowerCase());
+    const matchesAvail =
+      availFilter === "all" ||
+      (availFilter === "available" && dish.available) ||
+      (availFilter === "unavailable" && !dish.available);
+    return matchesSearch && matchesAvail;
+  });
+
+  const hasFilters = search.trim() !== "" || availFilter !== "all";
 
   function openCreate() {
     setEditing(null);
@@ -479,6 +506,54 @@ export function DishesModule() {
         }
       />
 
+      {/* Barre de recherche + filtres */}
+      {!loading && items.length > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un plat par nom ou description..."
+              className="pl-9"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Effacer la recherche"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Select value={availFilter} onValueChange={(v) => setAvailFilter(v as AvailabilityFilter)}>
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="Disponibilité" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les plats</SelectItem>
+              <SelectItem value="available">Disponibles</SelectItem>
+              <SelectItem value="unavailable">Indisponibles</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setAvailFilter("all");
+              }}
+              className="shrink-0"
+            >
+              <X className="h-4 w-4" />
+              Réinitialiser
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Statistiques */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -511,21 +586,39 @@ export function DishesModule() {
             <Skeleton key={i} className="h-80 w-full rounded-xl" />
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState
-          title="Aucun plat"
-          description="Ajoutez votre premier plat (ex: Kedjenou poulet)"
+          title={hasFilters ? "Aucun résultat" : "Aucun plat"}
+          description={
+            hasFilters
+              ? "Aucun plat ne correspond à votre recherche."
+              : "Ajoutez votre premier plat (ex: Kedjenou poulet)"
+          }
           icon={<UtensilsCrossed className="h-6 w-6" />}
           action={
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4" />
-              Ajouter un plat
-            </Button>
+            hasFilters ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSearch("");
+                  setAvailFilter("all");
+                }}
+              >
+                <X className="h-4 w-4" />
+                Réinitialiser les filtres
+              </Button>
+            ) : (
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4" />
+                Ajouter un plat
+              </Button>
+            )
           }
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map((dish) => (
+          {filtered.map((dish) => (
             <DishCard
               key={dish.id}
               dish={dish}

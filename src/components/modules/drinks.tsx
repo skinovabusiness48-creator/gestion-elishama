@@ -8,6 +8,8 @@ import {
   Plus,
   Trash2,
   Wine,
+  Search,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
@@ -44,6 +46,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, photoUrl } from "@/lib/api";
 import { cn, formatMoney } from "@/lib/utils";
@@ -367,6 +376,8 @@ function DrinkFormDialog({
 /* Module principal                                                    */
 /* ------------------------------------------------------------------ */
 
+type AvailabilityFilter = "all" | "available" | "unavailable";
+
 export function DrinksModule() {
   const [items, setItems] = useState<Drink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -374,6 +385,8 @@ export function DrinksModule() {
   const [editing, setEditing] = useState<Drink | null>(null);
   const [deleting, setDeleting] = useState<Drink | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [availFilter, setAvailFilter] = useState<AvailabilityFilter>("all");
 
   const load = useCallback(async () => {
     try {
@@ -396,6 +409,20 @@ export function DrinksModule() {
   }, [load]);
 
   const availableCount = items.filter((d) => d.available).length;
+
+  const filtered = items.filter((drink) => {
+    const matchesSearch =
+      search.trim() === "" ||
+      drink.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+      (drink.description ?? "").toLowerCase().includes(search.trim().toLowerCase());
+    const matchesAvail =
+      availFilter === "all" ||
+      (availFilter === "available" && drink.available) ||
+      (availFilter === "unavailable" && !drink.available);
+    return matchesSearch && matchesAvail;
+  });
+
+  const hasFilters = search.trim() !== "" || availFilter !== "all";
 
   function openCreate() {
     setEditing(null);
@@ -490,6 +517,54 @@ export function DrinksModule() {
         }
       />
 
+      {/* Barre de recherche + filtres */}
+      {!loading && items.length > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher une boisson par nom ou description..."
+              className="pl-9"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Effacer la recherche"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Select value={availFilter} onValueChange={(v) => setAvailFilter(v as AvailabilityFilter)}>
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="Disponibilité" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les boissons</SelectItem>
+              <SelectItem value="available">Disponibles</SelectItem>
+              <SelectItem value="unavailable">Indisponibles</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setAvailFilter("all");
+              }}
+              className="shrink-0"
+            >
+              <X className="h-4 w-4" />
+              Réinitialiser
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Statistiques */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -522,21 +597,39 @@ export function DrinksModule() {
             <Skeleton key={i} className="h-80 w-full rounded-xl" />
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState
-          title="Aucune boisson"
-          description="Ajoutez votre première boisson (ex: Coca, Fanta)"
+          title={hasFilters ? "Aucun résultat" : "Aucune boisson"}
+          description={
+            hasFilters
+              ? "Aucune boisson ne correspond à votre recherche."
+              : "Ajoutez votre première boisson (ex: Coca, Fanta)"
+          }
           icon={<Wine className="h-6 w-6" />}
           action={
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4" />
-              Ajouter une boisson
-            </Button>
+            hasFilters ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSearch("");
+                  setAvailFilter("all");
+                }}
+              >
+                <X className="h-4 w-4" />
+                Réinitialiser les filtres
+              </Button>
+            ) : (
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4" />
+                Ajouter une boisson
+              </Button>
+            )
           }
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map((drink) => (
+          {filtered.map((drink) => (
             <DrinkCard
               key={drink.id}
               drink={drink}

@@ -1,0 +1,957 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import {
+     5→  AlertCircle,
+     6→  Calendar,
+     7→  FileDown,
+     8→  FileSpreadsheet,
+     9→  ImageOff,
+    10→  Loader2,
+    11→  MoreHorizontal,
+    12→  Pencil,
+    13→  PiggyBank,
+    14→  Plus,
+    15→  Printer,
+    16→  Receipt,
+    17→  RotateCw,
+    18→  Trash2,
+    19→  Wallet,
+    20→} from "lucide-react";
+    21→import { toast } from "sonner";
+    22→
+    23→import { PageHeader } from "@/components/shared/PageHeader";
+    24→import { StatCard } from "@/components/shared/StatCard";
+    25→import { EmptyState } from "@/components/shared/EmptyState";
+    26→import { PhotoUpload } from "@/components/shared/PhotoUpload";
+    27→import { Button } from "@/components/ui/button";
+    28→import { Card, CardContent } from "@/components/ui/card";
+    29→import { Badge } from "@/components/ui/badge";
+    30→import { Input } from "@/components/ui/input";
+    31→import { Label } from "@/components/ui/label";
+    32→import { Textarea } from "@/components/ui/textarea";
+    33→import { Skeleton } from "@/components/ui/skeleton";
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from "@/components/ui/select";
+    41→import {
+    42→  Dialog,
+    43→  DialogContent,
+    44→  DialogDescription,
+    45→  DialogFooter,
+    46→  DialogHeader,
+    47→  DialogTitle,
+    48→} from "@/components/ui/dialog";
+    49→import {
+    50→  AlertDialog,
+    51→  AlertDialogAction,
+    52→  AlertDialogCancel,
+    53→  AlertDialogContent,
+    54→  AlertDialogDescription,
+    55→  AlertDialogFooter,
+    56→  AlertDialogHeader,
+    57→  AlertDialogTitle,
+    58→} from "@/components/ui/alert-dialog";
+    59→import {
+    60→  DropdownMenu,
+    61→  DropdownMenuContent,
+    62→  DropdownMenuItem,
+    63→  DropdownMenuSeparator,
+    64→  DropdownMenuTrigger,
+    65→} from "@/components/ui/dropdown-menu";
+    66→import {
+    67→  Table,
+    68→  TableBody,
+    69→  TableCell,
+    70→  TableHead,
+    71→  TableHeader,
+    72→  TableRow,
+    73→} from "@/components/ui/table";
+    74→import { apiFetch, photoUrl } from "@/lib/api";
+    75→import { cn, formatDate, formatMoney, toInputDate } from "@/lib/utils";
+    76→import { downloadCSV, downloadExcel, printHTML } from "@/lib/export";
+    77→
+    78→/* ------------------------------------------------------------------ */
+    79→/* Types                                                               */
+    80→/* ------------------------------------------------------------------ */
+    81→
+    82→interface ExpenseCategory {
+    83→  id: string;
+    84→  name: string;
+    85→  emoji: string | null;
+    86→  _count?: { expenses: number };
+    87→}
+    88→
+    89→interface Expense {
+    90→  id: string;
+    91→  name: string;
+    92→  amount: number;
+    93→  date: string;
+    94→  description: string | null;
+    95→  photo: string | null;
+    96→  categoryId: string | null;
+    97→  category: ExpenseCategory | null;
+    98→  createdAt: string;
+    99→}
+   100→
+   101→interface ExpenseFormValues {
+   102→  name: string;
+   103→  amount: string;
+   104→  date: string;
+   105→  description: string;
+   106→  photo: string | null;
+   107→  categoryId: string;
+   108→}
+   109→
+   110→type PeriodKey = "today" | "week" | "month" | "year" | "custom";
+   111→
+   112→const NO_CATEGORY = "__none__";
+   113→const CREATE_CATEGORY = "__create__";
+   114→
+   115→const PERIOD_LABELS: Record<PeriodKey, string> = {
+   116→  today: "Aujourd'hui",
+   117→  week: "Cette semaine",
+   118→  month: "Ce mois",
+   119→  year: "Cette année",
+   120→  custom: "Période personnalisée",
+   121→};
+   122→
+   123→function emptyForm(): ExpenseFormValues {
+   124→  return {
+   125→    name: "",
+   126→    amount: "",
+   127→    date: toInputDate(new Date()),
+   128→    description: "",
+   129→    photo: null,
+   130→    categoryId: NO_CATEGORY,
+   131→  };
+   132→}
+   133→
+   134→/* ------------------------------------------------------------------ */
+   135→/* Module                                                              */
+   136→/* ------------------------------------------------------------------ */
+   137→
+   138→export function ExpensesModule() {
+   139→  const [items, setItems] = useState<Expense[]>([]);
+   140→  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+   141→  const [loading, setLoading] = useState(true);
+   142→  const [refreshing, setRefreshing] = useState(false);
+   143→
+   144→  // Filtres
+   145→  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+   146→  const [period, setPeriod] = useState<PeriodKey>("month");
+   147→  const [from, setFrom] = useState("");
+   148→  const [to, setTo] = useState("");
+   149→
+   150→  // Formulaire dépense
+   151→  const [dialogOpen, setDialogOpen] = useState(false);
+   152→  const [editing, setEditing] = useState<Expense | null>(null);
+   153→  const [form, setForm] = useState<ExpenseFormValues>(emptyForm());
+   154→  const [saving, setSaving] = useState(false);
+   155→
+   156→  // Mini-dialogue création de catégorie (inline)
+   157→  const [catDialogOpen, setCatDialogOpen] = useState(false);
+   158→  const [catForm, setCatForm] = useState({ name: "", emoji: "" });
+   159→  const [catSaving, setCatSaving] = useState(false);
+   160→
+   161→  // Suppression (contrôlée par état car déclenchée depuis DropdownMenu)
+   162→  const [toDelete, setToDelete] = useState<Expense | null>(null);
+   163→  const [deleting, setDeleting] = useState(false);
+   164→
+   165→  // Visionneuse photo
+   166→  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+   167→
+   168→  /* ------------------------- Chargements ------------------------- */
+   169→
+   170→  const loadCategories = useCallback(async () => {
+   171→    try {
+   172→      const data = await apiFetch<ExpenseCategory[]>("/api/expense-categories");
+   173→      setCategories(data);
+   174→    } catch (err) {
+   175→      toast.error(
+   176→        err instanceof Error
+   177→          ? err.message
+   178→          : "Impossible de charger les catégories de dépenses",
+   179→      );
+   180→    }
+   181→  }, []);
+   182→
+   183→  const load = useCallback(
+   184→    async (opts?: { silent?: boolean }) => {
+   185→      try {
+   186→        if (opts?.silent) setRefreshing(true);
+   187→        else setLoading(true);
+   188→        const params = new URLSearchParams();
+   189→        if (categoryFilter !== "all") params.set("categoryId", categoryFilter);
+   190→        if (period === "custom") {
+   191→          if (from) params.set("from", from);
+   192→          if (to) params.set("to", to);
+   193→        } else {
+   194→          params.set("period", period);
+   195→        }
+   196→        const qs = params.toString();
+   197→        const data = await apiFetch<Expense[]>(`/api/expenses${qs ? `?${qs}` : ""}`);
+   198→        setItems(data);
+   199→      } catch (err) {
+   200→        toast.error(
+   201→          err instanceof Error ? err.message : "Impossible de charger les dépenses",
+   202→        );
+   203→      } finally {
+   204→        setLoading(false);
+   205→        setRefreshing(false);
+   206→      }
+   207→    },
+   208→    [categoryFilter, period, from, to],
+   209→  );
+   210→
+   211→  useEffect(() => {
+   212→    load();
+   213→  }, [load]);
+   214→
+   215→  useEffect(() => {
+   216→    loadCategories();
+   217→  }, [loadCategories]);
+   218→
+   219→  /* ------------------------- Statistiques ------------------------ */
+   220→
+   221→  const totalAmount = useMemo(
+   222→    () => items.reduce((s, e) => s + (Number(e.amount) || 0), 0),
+   223→    [items],
+   224→  );
+   225→  const count = items.length;
+   226→
+   227→  /* ------------------------- Formulaire dépense ------------------ */
+   228→
+   229→  function openCreate() {
+   230→    setEditing(null);
+   231→    setForm(emptyForm());
+   232→    setDialogOpen(true);
+   233→  }
+   234→
+   235→  function openEdit(e: Expense) {
+   236→    setEditing(e);
+   237→    setForm({
+   238→      name: e.name,
+   239→      amount: String(e.amount),
+   240→      date: toInputDate(e.date),
+   241→      description: e.description ?? "",
+   242→      photo: e.photo ?? null,
+   243→      categoryId: e.categoryId ?? NO_CATEGORY,
+   244→    });
+   245→    setDialogOpen(true);
+   246→  }
+   247→
+   248→  async function handleSubmit(e: React.FormEvent) {
+   249→    e.preventDefault();
+   250→    const name = form.name.trim();
+   251→    if (!name) {
+   252→      toast.error("Le nom de la dépense est requis");
+   253→      return;
+   254→    }
+   255→    const amount = Number(form.amount);
+   256→    if (!Number.isFinite(amount) || amount <= 0) {
+   257→      toast.error("Le montant doit être un nombre supérieur à 0");
+   258→      return;
+   259→    }
+   260→    setSaving(true);
+   261→    try {
+   262→      const body: Record<string, unknown> = {
+   263→        name,
+   264→        amount,
+   265→        date: form.date,
+   266→        description: form.description.trim() || null,
+   267→        photo: form.photo ?? null,
+   268→        categoryId: form.categoryId === NO_CATEGORY ? null : form.categoryId,
+   269→      };
+   270→      if (editing) {
+   271→        await apiFetch(`/api/expenses/${editing.id}`, {
+   272→          method: "PUT",
+   273→          body: JSON.stringify(body),
+   274→        });
+   275→        toast.success("Dépense modifiée");
+   276→      } else {
+   277→        await apiFetch("/api/expenses", {
+   278→          method: "POST",
+   279→          body: JSON.stringify(body),
+   280→        });
+   281→        toast.success("Dépense enregistrée");
+   282→      }
+   283→      setDialogOpen(false);
+   284→      load();
+   285→      loadCategories();
+   286→    } catch (err) {
+   287→      toast.error(
+   288→        err instanceof Error ? err.message : "Erreur lors de l'enregistrement",
+   289→      );
+   290→    } finally {
+   291→      setSaving(false);
+   292→    }
+   293→  }
+   294→
+   295→  /* --------------------- Création de catégorie ------------------- */
+   296→
+   297→  function openCreateCategory() {
+   298→    setCatForm({ name: "", emoji: "" });
+   299→    setCatDialogOpen(true);
+   300→  }
+   301→
+   302→  async function handleCreateCategory(e: React.FormEvent) {
+   303→    e.preventDefault();
+   304→    const name = catForm.name.trim();
+   305→    if (!name) {
+   306→      toast.error("Le nom de la catégorie est requis");
+   307→      return;
+   308→    }
+   309→    setCatSaving(true);
+   310→    try {
+   311→      const created = await apiFetch<ExpenseCategory>("/api/expense-categories", {
+   312→        method: "POST",
+   313→        body: JSON.stringify({ name, emoji: catForm.emoji.trim() || null }),
+   314→      });
+   315→      toast.success("Catégorie créée");
+   316→      await loadCategories();
+   317→      setForm((f) => ({ ...f, categoryId: created.id }));
+   318→      setCatDialogOpen(false);
+   319→    } catch (err) {
+   320→      toast.error(
+   321→        err instanceof Error ? err.message : "Erreur lors de la création",
+   322→      );
+   323→    } finally {
+   324→      setCatSaving(false);
+   325→    }
+   326→  }
+   327→
+   328→  /* ------------------------- Suppression ------------------------- */
+   329→
+   330→  async function confirmDelete() {
+   331→    if (!toDelete) return;
+   332→    setDeleting(true);
+   333→    try {
+   334→      await apiFetch(`/api/expenses/${toDelete.id}`, { method: "DELETE" });
+   335→      toast.success("Dépense supprimée");
+   336→      setToDelete(null);
+   337→      load();
+   338→      loadCategories();
+   339→    } catch (err) {
+   340→      toast.error(
+   341→        err instanceof Error ? err.message : "Erreur lors de la suppression",
+   342→      );
+   343→    } finally {
+   344→      setDeleting(false);
+   345→    }
+   346→  }
+   347→
+   348→  /* --------------------------- Exports --------------------------- */
+   349→
+   350→  function exportRows(): (string | number)[][] {
+   351→    return items.map((e) => [
+   352→      formatDate(e.date),
+   353→      e.name,
+   354→      e.amount,
+   355→      e.category ? `${e.category.emoji ?? ""} ${e.category.name}`.trim() : "",
+   356→      e.description ?? "",
+   357→    ]);
+   358→  }
+   359→
+   360→  const exportHeaders = ["Date", "Libellé", "Montant (FCFA)", "Catégorie", "Description"];
+   361→
+   362→  function handleCSV() {
+   363→    if (items.length === 0) {
+   364→      toast.info("Aucune dépense à exporter");
+   365→      return;
+   366→    }
+   367→    downloadCSV("depenses", exportHeaders, exportRows());
+   368→  }
+   369→
+   370→  function handleExcel() {
+   371→    if (items.length === 0) {
+   372→      toast.info("Aucune dépense à exporter");
+   373→      return;
+   374→    }
+   375→    downloadExcel("depenses", "Dépenses", exportHeaders, exportRows());
+   376→  }
+   377→
+   378→  function handlePDF() {
+   379→    if (items.length === 0) {
+   380→      toast.info("Aucune dépense à exporter");
+   381→      return;
+   382→    }
+   383→    const cards = `
+   384→      <div class="grid">
+   385→        <div class="card"><div class="l">Total dépenses</div><div class="v">${formatMoney(totalAmount)}</div></div>
+   386→        <div class="card"><div class="l">Nombre de dépenses</div><div class="v">${count}</div></div>
+   387→        <div class="card"><div class="l">Période</div><div class="v" style="font-size:14px">${PERIOD_LABELS[period]}</div></div>
+   388→      </div>`;
+   389→    const rows = items
+   390→      .map(
+   391→        (e) =>
+   392→          `<tr><td>${formatDate(e.date)}</td><td>${escapeHTML(e.name)}</td><td style="text-align:right">${formatMoney(e.amount)}</td><td>${e.category ? escapeHTML(`${e.category.emoji ?? ""} ${e.category.name}`.trim()) : ""}</td><td>${escapeHTML(e.description ?? "")}</td></tr>`,
+   393→      )
+   394→      .join("");
+   395→    const table = `
+   396→      <table>
+   397→        <thead><tr><th>Date</th><th>Libellé</th><th style="text-align:right">Montant</th><th>Catégorie</th><th>Description</th></tr></thead>
+   398→        <tbody>
+   399→          ${rows}
+   400→          <tr class="total"><td colspan="2">Total</td><td style="text-align:right">${formatMoney(totalAmount)}</td><td colspan="2"></td></tr>
+   401→        </tbody>
+   402→      </table>`;
+   403→    printHTML("Dépenses", cards + table);
+   404→  }
+   405→
+   406→  /* --------------------------- Render ---------------------------- */
+   407→
+   408→  return (
+   409→    <div className="space-y-6">
+   410→      <PageHeader
+   411→        title="Dépenses"
+   412→        description="Suivez toutes vos dépenses"
+   413→        icon={<Wallet className="h-5 w-5" />}
+   414→        actions={
+   415→          <>
+   416→            <Button
+   417→              variant="outline"
+   418→              size="sm"
+   419→              onClick={() => load({ silent: true })}
+   420→              disabled={refreshing}
+   421→            >
+   422→              <RotateCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+   423→              <span className="hidden sm:inline">Actualiser</span>
+   424→            </Button>
+   425→            <Button size="sm" onClick={openCreate}>
+   426→              <Plus className="h-4 w-4" />
+   427→              Nouvelle dépense
+   428→            </Button>
+   429→          </>
+   430→        }
+   431→      />
+   432→
+   433→      {/* Filtres + exports */}
+   434→      <Card>
+   435→        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end sm:flex-wrap">
+   436→          <div className="flex flex-col gap-1.5">
+   437→            <Label className="text-xs text-muted-foreground">Catégorie</Label>
+   438→            <Select
+   439→              value={categoryFilter}
+   440→              onValueChange={(v) => setCategoryFilter(v)}
+   441→            >
+   442→              <SelectTrigger className="w-[220px]">
+   443→                <SelectValue />
+   444→              </SelectTrigger>
+   445→              <SelectContent>
+   446→                <SelectItem value="all">Toutes les catégories</SelectItem>
+   447→                {categories.map((c) => (
+   448→                  <SelectItem key={c.id} value={c.id}>
+   449→                    {c.emoji ? `${c.emoji} ` : ""}
+   450→                    {c.name}
+   451→                  </SelectItem>
+   452→                ))}
+   453→              </SelectContent>
+   454→            </Select>
+   455→          </div>
+   456→
+   457→          <div className="flex flex-col gap-1.5">
+   458→            <Label className="text-xs text-muted-foreground">Période</Label>
+   459→            <Select
+   460→              value={period}
+   461→              onValueChange={(v) => setPeriod(v as PeriodKey)}
+   462→            >
+   463→              <SelectTrigger className="w-[200px]">
+   464→                <SelectValue />
+   465→              </SelectTrigger>
+   466→              <SelectContent>
+   467→                <SelectItem value="today">Aujourd&apos;hui</SelectItem>
+   468→                <SelectItem value="week">Cette semaine</SelectItem>
+   469→                <SelectItem value="month">Ce mois</SelectItem>
+   470→                <SelectItem value="year">Cette année</SelectItem>
+   471→                <SelectItem value="custom">Personnalisé</SelectItem>
+   472→              </SelectContent>
+   473→            </Select>
+   474→          </div>
+   475→
+   476→          {period === "custom" && (
+   477→            <>
+   478→              <div className="flex flex-col gap-1.5">
+   479→                <Label className="text-xs text-muted-foreground">Du</Label>
+   480→                <Input
+   481→                  type="date"
+   482→                  value={from}
+   483→                  onChange={(e) => setFrom(e.target.value)}
+   484→                  className="w-[170px]"
+   485→                />
+   486→              </div>
+   487→              <div className="flex flex-col gap-1.5">
+   488→                <Label className="text-xs text-muted-foreground">Au</Label>
+   489→                <Input
+   490→                  type="date"
+   491→                  value={to}
+   492→                  onChange={(e) => setTo(e.target.value)}
+   493→                  className="w-[170px]"
+   494→                />
+   495→              </div>
+   496→            </>
+   497→          )}
+   498→
+   499→          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+   500→            <Button variant="outline" size="sm" onClick={handleCSV}>
+   501→              <FileDown className="h-4 w-4" />
+   502→              CSV
+   503→            </Button>
+   504→            <Button variant="outline" size="sm" onClick={handleExcel}>
+   505→              <FileSpreadsheet className="h-4 w-4" />
+   506→              Excel
+   507→            </Button>
+   508→            <Button variant="outline" size="sm" onClick={handlePDF}>
+   509→              <Printer className="h-4 w-4" />
+   510→              PDF
+   511→            </Button>
+   512→          </div>
+   513→        </CardContent>
+   514→      </Card>
+   515→
+   516→      {/* Statistiques période */}
+   517→      {loading ? (
+   518→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+   519→          {Array.from({ length: 2 }).map((_, i) => (
+   520→            <Skeleton key={i} className="h-28 w-full" />
+   521→          ))}
+   522→        </div>
+   523→      ) : (
+   524→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+   525→          <StatCard
+   526→            label="Total dépenses"
+   527→            value={formatMoney(totalAmount)}
+   528→            icon={<Wallet className="h-5 w-5" />}
+   529→            tone="warning"
+   530→            hint={PERIOD_LABELS[period]}
+   531→          />
+   532→          <StatCard
+   533→            label="Nombre de dépenses"
+   534→            value={count}
+   535→            icon={<Receipt className="h-5 w-5" />}
+   536→            tone="default"
+   537→            hint={PERIOD_LABELS[period]}
+   538→          />
+   539→        </div>
+   540→      )}
+   541→
+   542→      {/* Tableau des dépenses */}
+   543→      <Card>
+   544→        <CardContent className="p-0">
+   545→          {loading ? (
+   546→            <div className="space-y-2 p-4">
+   547→              {Array.from({ length: 5 }).map((_, i) => (
+   548→                <Skeleton key={i} className="h-12 w-full" />
+   549→              ))}
+   550→            </div>
+   551→          ) : items.length === 0 ? (
+   552→            <EmptyState
+   553→              className="m-4"
+   554→              title="Aucune dépense"
+   555→              description="Enregistrez votre première dépense pour suivre vos sorties d'argent."
+   556→              icon={<Wallet className="h-6 w-6" />}
+   557→              action={
+   558→                <Button size="sm" onClick={openCreate}>
+   559→                  <Plus className="h-4 w-4" />
+   560→                  Nouvelle dépense
+   561→                </Button>
+   562→              }
+   563→            />
+   564→          ) : (
+   565→            <div className="max-h-[60vh] overflow-auto scroll-thin">
+   566→              <Table>
+   567→                <TableHeader className="sticky top-0 z-10 bg-card">
+   568→                  <TableRow>
+   569→                    <TableHead className="w-[120px]">Date</TableHead>
+   570→                    <TableHead>Nom</TableHead>
+   571→                    <TableHead className="text-right">Montant</TableHead>
+   572→                    <TableHead className="w-[160px]">Catégorie</TableHead>
+   573→                    <TableHead className="w-[80px] text-center">Facture</TableHead>
+   574→                    <TableHead className="hidden md:table-cell">Description</TableHead>
+   575→                    <TableHead className="w-[60px] text-right">Actions</TableHead>
+   576→                  </TableRow>
+   577→                </TableHeader>
+   578→                <TableBody>
+   579→                  {items.map((e) => (
+   580→                    <TableRow key={e.id}>
+   581→                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+   582→                        {formatDate(e.date)}
+   583→                      </TableCell>
+   584→                      <TableCell className="font-medium">{e.name}</TableCell>
+   585→                      <TableCell className="text-right font-semibold tabular-nums text-destructive whitespace-nowrap">
+   586→                        −{formatMoney(e.amount)}
+   587→                      </TableCell>
+   588→                      <TableCell>
+   589→                        {e.category ? (
+   590→                          <Badge variant="secondary" className="gap-1">
+   591→                            {e.category.emoji && <span>{e.category.emoji}</span>}
+   592→                            <span className="truncate max-w-[120px]">
+   593→                              {e.category.name}
+   594→                            </span>
+   595→                          </Badge>
+   596→                        ) : (
+   597→                          <span className="text-xs text-muted-foreground italic">
+   598→                            —
+   599→                          </span>
+   600→                        )}
+   601→                      </TableCell>
+   602→                      <TableCell className="text-center">
+   603→                        {e.photo ? (
+   604→                          <button
+   605→                            type="button"
+   606→                            onClick={() => setPhotoPreview(e.photo)}
+   607→                            className="inline-block h-10 w-10 overflow-hidden rounded-md border bg-muted transition hover:ring-2 hover:ring-primary/50"
+   608→                            title="Voir la facture"
+   609→                          >
+   610→                            <img
+   611→                              src={photoUrl(e.photo)}
+   612→                              alt="Facture"
+   613→                              className="h-full w-full object-cover"
+   614→                            />
+   615→                          </button>
+   616→                        ) : (
+   617→                          <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-dashed text-muted-foreground/50">
+   618→                            <ImageOff className="h-4 w-4" />
+   619→                          </span>
+   620→                        )}
+   621→                      </TableCell>
+   622→                      <TableCell className="hidden md:table-cell max-w-[280px]">
+   623→                        {e.description ? (
+   624→                          <span
+   625→                            className="line-clamp-1 text-sm text-muted-foreground"
+   626→                            title={e.description}
+   627→                          >
+   628→                            {e.description}
+   629→                          </span>
+   630→                        ) : (
+   631→                          <span className="text-xs text-muted-foreground italic">—</span>
+   632→                        )}
+   633→                      </TableCell>
+   634→                      <TableCell className="text-right">
+   635→                        <DropdownMenu>
+   636→                          <DropdownMenuTrigger asChild>
+   637→                            <Button variant="ghost" size="icon" className="h-8 w-8">
+   638→                              <MoreHorizontal className="h-4 w-4" />
+   639→                              <span className="sr-only">Actions</span>
+   640→                            </Button>
+   641→                          </DropdownMenuTrigger>
+   642→                          <DropdownMenuContent align="end">
+   643→                            <DropdownMenuItem onClick={() => openEdit(e)}>
+   644→                              <Pencil className="h-4 w-4" />
+   645→                              Modifier
+   646→                            </DropdownMenuItem>
+   647→                            <DropdownMenuSeparator />
+   648→                            <DropdownMenuItem
+   649→                              className="text-destructive focus:text-destructive"
+   650→                              onClick={() => setToDelete(e)}
+   651→                            >
+   652→                              <Trash2 className="h-4 w-4" />
+   653→                              Supprimer
+   654→                            </DropdownMenuItem>
+   655→                          </DropdownMenuContent>
+   656→                        </DropdownMenu>
+   657→                      </TableCell>
+   658→                    </TableRow>
+   659→                  ))}
+   660→                </TableBody>
+   661→              </Table>
+   662→            </div>
+   663→          )}
+   664→        </CardContent>
+   665→      </Card>
+   666→
+   667→      {/* ----------------------- Formulaire dépense ----------------------- */}
+   668→      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+   669→        <DialogContent className="sm:max-w-lg">
+   670→          <DialogHeader>
+   671→            <DialogTitle className="flex items-center gap-2">
+   672→              <Wallet className="h-5 w-5 text-primary" />
+   673→              {editing ? "Modifier la dépense" : "Nouvelle dépense"}
+   674→            </DialogTitle>
+   675→            <DialogDescription>
+   676→              {editing
+   677→                ? "Mettez à jour les informations de la dépense."
+   678→                : "Renseignez les informations de la dépense."}
+   679→            </DialogDescription>
+   680→          </DialogHeader>
+   681→          <form onSubmit={handleSubmit} className="space-y-4">
+   682→            <div className="space-y-1.5">
+   683→              <Label htmlFor="exp-name">
+   684→                Nom de la dépense <span className="text-destructive">*</span>
+   685→              </Label>
+   686→              <Input
+   687→                id="exp-name"
+   688→                value={form.name}
+   689→                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+   690→                placeholder="Ex. Achat de gaz"
+   691→                required
+   692→              />
+   693→            </div>
+   694→
+   695→            <div className="grid grid-cols-2 gap-3">
+   696→              <div className="space-y-1.5">
+   697→                <Label htmlFor="exp-amount">
+   698→                  Montant (FCFA) <span className="text-destructive">*</span>
+   699→                </Label>
+   700→                <Input
+   701→                  id="exp-amount"
+   702→                  type="number"
+   703→                  min={0}
+   704→                  step="any"
+   705→                  inputMode="decimal"
+   706→                  value={form.amount}
+   707→                  onChange={(e) =>
+   708→                    setForm((f) => ({ ...f, amount: e.target.value }))
+   709→                  }
+   710→                  placeholder="0"
+   711→                  required
+   712→                />
+   713→              </div>
+   714→              <div className="space-y-1.5">
+   715→                <Label htmlFor="exp-date">Date</Label>
+   716→                <Input
+   717→                  id="exp-date"
+   718→                  type="date"
+   719→                  value={form.date}
+   720→                  onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+   721→                />
+   722→              </div>
+   723→            </div>
+   724→
+   725→            <div className="space-y-1.5">
+   726→              <Label htmlFor="exp-category">Catégorie</Label>
+   727→              <Select
+   728→                value={form.categoryId}
+   729→                onValueChange={(v) => {
+   730→                  if (v === CREATE_CATEGORY) {
+   731→                    openCreateCategory();
+   732→                  } else {
+   733→                    setForm((f) => ({ ...f, categoryId: v }));
+   734→                  }
+   735→                }}
+   736→              >
+   737→                <SelectTrigger id="exp-category">
+   738→                  <SelectValue placeholder="Choisir une catégorie" />
+   739→                </SelectTrigger>
+   740→                <SelectContent>
+   741→                  <SelectItem value={NO_CATEGORY}>Aucune</SelectItem>
+   742→                  {categories.map((c) => (
+   743→                    <SelectItem key={c.id} value={c.id}>
+   744→                      {c.emoji ? `${c.emoji} ` : ""}
+   745→                      {c.name}
+   746→                    </SelectItem>
+   747→                  ))}
+   748→                  <DropdownMenuSeparator className="my-1 h-px bg-border" />
+   749→                  <SelectItem value={CREATE_CATEGORY}>
+   750→                    <span className="flex items-center gap-1 text-primary">
+   751→                      <Plus className="h-3.5 w-3.5" />
+   752→                      Créer une catégorie…
+   753→                    </span>
+   754→                  </SelectItem>
+   755→                </SelectContent>
+   756→              </Select>
+   757→            </div>
+   758→
+   759→            <PhotoUpload
+   760→              label="Photo de la facture"
+   761→              value={form.photo}
+   762→              onChange={(p) => setForm((f) => ({ ...f, photo: p }))}
+   763→            />
+   764→
+   765→            <div className="space-y-1.5">
+   766→              <Label htmlFor="exp-desc">Description (optionnel)</Label>
+   767→              <Textarea
+   768→                id="exp-desc"
+   769→                value={form.description}
+   770→                onChange={(e) =>
+   771→                  setForm((f) => ({ ...f, description: e.target.value }))
+   772→                }
+   773→                placeholder="Détails complémentaires…"
+   774→                rows={3}
+   775→              />
+   776→            </div>
+   777→
+   778→            <DialogFooter>
+   779→              <Button
+   780→                type="button"
+   781→                variant="outline"
+   782→                onClick={() => setDialogOpen(false)}
+   783→                disabled={saving}
+   784→              >
+   785→                Annuler
+   786→              </Button>
+   787→              <Button type="submit" disabled={saving}>
+   788→                {saving ? (
+   789→                  <Loader2 className="h-4 w-4 animate-spin" />
+   790→                ) : (
+   791→                  <PiggyBank className="h-4 w-4" />
+   792→                )}
+   793→                {editing ? "Enregistrer" : "Ajouter"}
+   794→              </Button>
+   795→            </DialogFooter>
+   796→          </form>
+   797→        </DialogContent>
+   798→      </Dialog>
+   799→
+   800→      {/* ----------------- Mini-dialogue création catégorie ----------------- */}
+   801→      <Dialog
+   802→        open={catDialogOpen}
+   803→        onOpenChange={(o) => !catSaving && setCatDialogOpen(o)}
+   804→      >
+   805→        <DialogContent className="sm:max-w-sm">
+   806→          <DialogHeader>
+   807→            <DialogTitle className="flex items-center gap-2 text-base">
+   808→              <Plus className="h-4 w-4 text-primary" />
+   809→              Nouvelle catégorie
+   810→            </DialogTitle>
+   811→            <DialogDescription>
+   812→              Créez une catégorie pour organiser vos dépenses.
+   813→            </DialogDescription>
+   814→          </DialogHeader>
+   815→          <form onSubmit={handleCreateCategory} className="space-y-4">
+   816→            <div className="grid grid-cols-[80px_1fr] gap-3">
+   817→              <div className="space-y-1.5">
+   818→                <Label htmlFor="cat-emoji">Emoji</Label>
+   819→                <Input
+   820→                  id="cat-emoji"
+   821→                  value={catForm.emoji}
+   822→                  onChange={(e) =>
+   823→                    setCatForm((s) => ({ ...s, emoji: e.target.value }))
+   824→                  }
+   825→                  placeholder="🍽️"
+   826→                  maxLength={8}
+   827→                  className="text-center text-lg"
+   828→                />
+   829→              </div>
+   830→              <div className="space-y-1.5">
+   831→                <Label htmlFor="cat-name">
+   832→                  Nom <span className="text-destructive">*</span>
+   833→                </Label>
+   834→                <Input
+   835→                  id="cat-name"
+   836→                  value={catForm.name}
+   837→                  onChange={(e) =>
+   838→                    setCatForm((s) => ({ ...s, name: e.target.value }))
+   839→                  }
+   840→                  placeholder="Ex. Loyer"
+   841→                  required
+   842→                />
+   843→              </div>
+   844→            </div>
+   845→            <DialogFooter>
+   846→              <Button
+   847→                type="button"
+   848→                variant="outline"
+   849→                onClick={() => setCatDialogOpen(false)}
+   850→                disabled={catSaving}
+   851→              >
+   852→                Annuler
+   853→              </Button>
+   854→              <Button type="submit" disabled={catSaving}>
+   855→                {catSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+   856→                Créer
+   857→              </Button>
+   858→            </DialogFooter>
+   859→          </form>
+   860→        </DialogContent>
+   861→      </Dialog>
+   862→
+   863→      {/* ----------------------- Confirmation suppression ----------------------- */}
+   864→      <AlertDialog
+   865→        open={!!toDelete}
+   866→        onOpenChange={(o) => !deleting && setToDelete(o ? toDelete : null)}
+   867→      >
+   868→        <AlertDialogContent>
+   869→          <AlertDialogHeader>
+   870→            <AlertDialogTitle className="flex items-center gap-2">
+   871→              <AlertCircle className="h-5 w-5 text-destructive" />
+   872→              Supprimer cette dépense ?
+   873→            </AlertDialogTitle>
+   874→            <AlertDialogDescription>
+   875→              {toDelete && (
+   876→                <>
+   877→                  Vous êtes sur le point de supprimer la dépense{" "}
+   878→                  <span className="font-medium text-foreground">
+   879→                    « {toDelete.name} »
+   880→                  </span>{" "}
+   881→                  d&apos;un montant de{" "}
+   882→                  <span className="font-medium text-foreground">
+   883→                    {formatMoney(toDelete.amount)}
+   884→                  </span>
+   885→                  . Cette action est irréversible.
+   886→                </>
+   887→              )}
+   888→            </AlertDialogDescription>
+   889→          </AlertDialogHeader>
+   890→          <AlertDialogFooter>
+   891→            <AlertDialogCancel disabled={deleting}>Annuler</AlertDialogCancel>
+   892→            <AlertDialogAction
+   893→              onClick={(e) => {
+   894→                e.preventDefault();
+   895→                confirmDelete();
+   896→              }}
+   897→              disabled={deleting}
+   898→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   899→            >
+   900→              {deleting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+   901→              Supprimer
+   902→            </AlertDialogAction>
+   903→          </AlertDialogFooter>
+   904→        </AlertDialogContent>
+   905→      </AlertDialog>
+   906→
+   907→      {/* ----------------------- Visionneuse photo ----------------------- */}
+   908→      <Dialog
+   909→        open={!!photoPreview}
+   910→        onOpenChange={(o) => !o && setPhotoPreview(null)}
+   911→      >
+   912→        <DialogContent className="sm:max-w-3xl">
+   913→          <DialogHeader>
+   914→            <DialogTitle className="flex items-center gap-2">
+   915→              <Receipt className="h-5 w-5 text-primary" />
+   916→              Facture
+   917→            </DialogTitle>
+   918→          </DialogHeader>
+   919→          {photoPreview && (
+   920→            <div className="overflow-hidden rounded-lg border bg-muted">
+   921→              <img
+   922→                src={photoUrl(photoPreview)}
+   923→                alt="Facture"
+   924→                className="mx-auto max-h-[70vh] w-full object-contain"
+   925→              />
+   926→            </div>
+   927→          )}
+   928→        </DialogContent>
+   929→      </Dialog>
+   930→
+   931→      {/* Petit indicateur visuel période (footer implicite via PageHeader description) */}
+   932→      <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+   933→        <Calendar className="h-3.5 w-3.5" />
+   934→        {PERIOD_LABELS[period]}
+   935→        {period === "custom" && (from || to) && (
+   936→          <span className="ml-1">
+   937→            ({from || "…"} → {to || "…"})
+   938→          </span>
+   939→        )}
+   940→      </div>
+   941→    </div>
+   942→  );
+   943→}
+   944→
+   945→/* ------------------------------------------------------------------ */
+   946→/* Utils locaux                                                        */
+   947→/* ------------------------------------------------------------------ */
+   948→
+   949→function escapeHTML(str: string): string {
+   950→  return str
+   951→    .replace(/&/g, "&amp;")
+   952→    .replace(/</g, "&lt;")
+   953→    .replace(/>/g, "&gt;")
+   954→    .replace(/"/g, "&quot;")
+   955→    .replace(/'/g, "&#39;");
+   956→}
+   957→

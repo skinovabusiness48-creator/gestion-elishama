@@ -394,3 +394,70 @@ Stage Summary:
 - Fonctionnement 100% hors connexion : toutes données en SQLite local + photos locales, service worker cache le shell et les assets
 - Guide d'installation complet fourni (GUIDE-INSTALLATION.md) + script .bat de démarrage automatique Windows
 - Pour utiliser hors ligne : lancer le serveur Next sur la machine (npm run start) → ouvrir localhost:3000 → installer via navigateur
+
+---
+Task ID: 15
+Agent: subagent-I (PDF migration)
+Task: Remplacer printHTML par downloadPDF (vrai fichier .pdf) dans 4 modules
+
+Work Log:
+- Lecture du contexte (worklog + src/lib/export.ts) : `downloadPDF(filename, headers, rows, options)` génère un vrai PDF via jsPDF + jspdf-autotable (paysage A4, en-tête orange ELISHAMA, KPI cards optionnelles, ligne de total en gras, pied de page paginé). `printHTML` conservé mais déprécié.
+- `src/components/modules/export.tsx` :
+  - Import : `printHTML` → `downloadPDF` (downloadExcel conservé).
+  - `exportPDF()` réécrit : récupère `parsed` (headers + rows) via `fetchCSV`, convertit avec `toNumeric`, calcule `totalForCSV`, appelle `downloadPDF(fileBase(type), parsed.headers, rows, { title, subtitle, total })`.
+  - `subtitle` : `Période : <from> → <to> · N ligne(s)` (ou « toutes les dates »).
+  - `total` : `{ label, value: "<n> FCFA" }` si `totalForCSV` renvoie un total, sinon `undefined`.
+  - Toast succès : `Export PDF « X » téléchargé` (+ description nb lignes).
+  - Helper local `escapeHTML` supprimé (plus utilisé).
+  - Texte d'aide bas de module remplacé par : « Les exports PDF, Excel et CSV sont téléchargés directement sur votre appareil. »
+- `src/components/modules/sales.tsx` (HistoryPanel) :
+  - Import : `printHTML` → `downloadPDF`.
+  - `handlePDF()` réécrit : headers `["Date","Articles","Total (FCFA)"]`, rows `[formatDateTime(s.date), itemCount(s), s.totalAmount]`, options `{ title:"Ventes", subtitle:"<période> · N ventes", summaryCards:[Revenu/Nombre/Panier moyen], total:{label:"Total général", value: formatMoney(totalRevenue)} }`.
+  - Toast succès ajouté : « Export PDF « Ventes » téléchargé ».
+- `src/components/modules/expenses.tsx` :
+  - Import : `printHTML` → `downloadPDF`.
+  - `handlePDF()` réécrit : réutilise `exportHeaders` + `exportRows()` existants, options `{ title:"Dépenses", subtitle, summaryCards:[Total dépenses/Nombre/Période], total:{label:"Total", value:formatMoney(totalAmount)} }`.
+  - Helper local `escapeHTML` (en bas de fichier) supprimé.
+  - Toast succès ajouté : « Export PDF « Dépenses » téléchargé ».
+- `src/components/modules/accounting.tsx` :
+  - Import : `printHTML` → `downloadPDF`.
+  - `handlePDF()` réécrit : réutilise `exportHeaders` + `exportRows()` existants (Type, Date, Libellé, Détail, Montant signé), options `{ title:"Comptabilité — <période>", subtitle:"N mouvements", summaryCards:[Entrées/Sorties/Bénéfice], total:{label:"Bénéfice net", value:formatMoney(profit)} }`.
+  - Helper local `escapeHTML` (en bas de fichier) supprimé.
+  - Toast succès ajouté : « Export PDF « Comptabilité » téléchargé ».
+- Vérifications :
+  - `bun run lint` → 0 erreur, 0 warning.
+  - `bunx tsc --noEmit` → aucune erreur sur les 4 fichiers modifiés (erreurs résiduelles uniquement dans `examples/` et `skills/`, hors périmètre).
+  - Grep `printHTML|escapeHTML` sur `src/components/modules` → 0 occurrence (la définition `printHTML` reste uniquement dans `src/lib/export.ts` pour rétro-compat).
+
+Stage Summary:
+- Fichiers modifiés: export.tsx, sales.tsx, expenses.tsx, accounting.tsx
+- printHTML remplacé par downloadPDF partout ; plus aucun appel à printHTML côté modules
+- Helpers locaux escapeHTML retirés de export.tsx, expenses.tsx, accounting.tsx (inutilisés après migration)
+- Toasts harmonisés : « Export PDF « X » téléchargé » (plus de mention de fenêtre d'impression)
+- Les 3 KPIs du module Comptabilité utilisent `options.summaryCards` ; totaux générés via `options.total` quand pertinent (sales/expenses/accounting/export selon type)
+- Fonctionnalités préservées : caisse POS, panier, filtres période/catégorie, historique, dialogues CRUD, refresh silencieux — aucun impact
+- `printHTML` reste exporté de `src/lib/export.ts` mais n'est plus consommé nulle part dans l'app
+
+---
+Task ID: 16
+Agent: main (orchestrator) — Recherche/filtre Plats+Boissons + Vrai export PDF
+Task: Ajouter recherche + filtre dispo aux modules Plats et Boissons ; remplacer l'impression par un vrai téléchargement PDF
+
+Work Log:
+- Installé jspdf + jspdf-autotable (génération PDF côté client, téléchargement direct)
+- Mis à jour src/lib/export.ts : ajout downloadPDF(filename, headers, rows, options) avec en-tête orange ELISHAMA, cartes KPI optionnelles, ligne de total, pied de page paginé. printHTML conservé pour rétrocompat mais inutilisé.
+- Subagent-I a migré les 4 modules (export.tsx, sales.tsx, expenses.tsx, accounting.tsx) de printHTML vers downloadPDF (0 erreur lint/tsc)
+- Ajouté recherche (par nom + description) + filtre disponibilité (Tous/Disponibles/Indisponibles) au module Plats (dishes.tsx) : barre de filtres entre PageHeader et StatCards, bouton Réinitialiser, EmptyState contextuel
+- Ajouté la même recherche + filtre au module Boissons (drinks.tsx)
+- Corrigé une faute de frappe (Button\nn -> Button) introduite dans dishes.tsx
+- lint : 0 erreur, 0 warning ; tsc : 0 erreur sur le code applicatif
+- Vérification Agent Browser :
+  1. Plats : recherche "kedj" -> trouve Kedjenou ; "xyz" -> "Aucun résultat" ; filtre Indisponibles -> "Aucun résultat" (le plat est dispo) ; reset -> plat réapparaît ✅
+  2. Boissons : barre recherche + filtre "Toutes les boissons" présents ✅
+  3. Export PDF (module Export, carte Ventes) : clic PDF -> fichier ventes.pdf (8,7 Ko, PDF valide %PDF-1.3) téléchargé dans ~/Downloads/, PAS de fenêtre d'impression, un seul onglet navigateur ✅
+  4. Texte d'aide mis à jour : "Les exports PDF, Excel et CSV sont téléchargés directement sur votre appareil."
+
+Stage Summary:
+- Plats et Boissons : recherche instantanée + filtre disponibilité fonctionnels
+- Export PDF : génère un VRAI fichier .pdf téléchargé directement (jsPDF + autotable, en-tête ELISHAMA orange, tableau paginé) — fini la fenêtre d'impression
+- 4 modules concernés par le PDF mis à jour (Export, Ventes, Dépenses, Comptabilité)

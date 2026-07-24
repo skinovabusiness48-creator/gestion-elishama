@@ -1,0 +1,1120 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import {
+     5→  Eye,
+     6→  FileDown,
+     7→  FileSpreadsheet,
+     8→  History,
+     9→  Loader2,
+    10→  Minus,
+    11→  Package,
+    12→  Plus,
+    13→  Printer,
+    14→  Receipt,
+    15→  RotateCw,
+    16→  Search,
+    17→  ShoppingBag,
+    18→  ShoppingCart,
+    19→  Trash2,
+    20→  TrendingUp,
+    21→  UtensilsCrossed,
+    22→  Wallet,
+    23→  Wine,
+    24→  X,
+    25→} from "lucide-react";
+    26→import { PageHeader } from "@/components/shared/PageHeader";
+    27→import { StatCard } from "@/components/shared/StatCard";
+    28→import { EmptyState } from "@/components/shared/EmptyState";
+    29→import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+    30→import { Button } from "@/components/ui/button";
+    31→import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+    32→import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+    33→import { Input } from "@/components/ui/input";
+    34→import { Label } from "@/components/ui/label";
+    35→import { Textarea } from "@/components/ui/textarea";
+    36→import { Badge } from "@/components/ui/badge";
+    37→import { Skeleton } from "@/components/ui/skeleton";
+    38→import {
+    39→  Select,
+    40→  SelectTrigger,
+    41→  SelectValue,
+    42→  SelectContent,
+    43→  SelectItem,
+    44→} from "@/components/ui/select";
+    45→import {
+    46→  Dialog,
+    47→  DialogContent,
+    48→  DialogHeader,
+    49→  DialogTitle,
+    50→  DialogDescription,
+    51→} from "@/components/ui/dialog";
+    52→import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+    53→import { ScrollArea } from "@/components/ui/scroll-area";
+    54→import {
+    55→  Table,
+    56→  TableHeader,
+    57→  TableBody,
+    58→  TableHead,
+    59→  TableRow,
+    60→  TableCell,
+    61→} from "@/components/ui/table";
+    62→import { apiFetch, photoUrl } from "@/lib/api";
+    63→import { cn, formatMoney, formatNumber, formatDateTime } from "@/lib/utils";
+    64→import { downloadCSV, downloadExcel, printHTML } from "@/lib/export";
+    65→import { toast } from "sonner";
+    66→
+    67→/* ------------------------------------------------------------------ */
+    68→/* Types                                                               */
+    69→/* ------------------------------------------------------------------ */
+    70→
+    71→type ItemType = "product" | "dish" | "drink";
+    72→
+    73→interface Product {
+    74→  id: string;
+    75→  name: string;
+    76→  salePrice: number;
+    77→  photo?: string | null;
+    78→  available?: boolean;
+    79→  unit?: string;
+    80→  quantity?: number;
+    81→}
+    82→interface Dish {
+    83→  id: string;
+    84→  name: string;
+    85→  price: number;
+    86→  photo?: string | null;
+    87→  available?: boolean;
+    88→}
+    89→interface Drink {
+    90→  id: string;
+    91→  name: string;
+    92→  price: number;
+    93→  photo?: string | null;
+    94→  available?: boolean;
+    95→}
+    96→interface SaleItem {
+    97→  id: string;
+    98→  itemType: ItemType;
+    99→  productId: string | null;
+   100→  dishId: string | null;
+   101→  drinkId: string | null;
+   102→  itemName: string;
+   103→  quantity: number;
+   104→  unitPrice: number;
+   105→  total: number;
+   106→}
+   107→interface Sale {
+   108→  id: string;
+   109→  date: string;
+   110→  totalAmount: number;
+   111→  note: string | null;
+   112→  createdAt: string;
+   113→  items: SaleItem[];
+   114→}
+   115→interface CartItem {
+   116→  itemType: ItemType;
+   117→  refId: string;
+   118→  itemName: string;
+   119→  quantity: number;
+   120→  unitPrice: number;
+   121→  photo?: string | null;
+   122→}
+   123→
+   124→type PeriodKey = "today" | "week" | "month" | "year" | "custom";
+   125→
+   126→/* ------------------------------------------------------------------ */
+   127→/* Helpers                                                             */
+   128→/* ------------------------------------------------------------------ */
+   129→
+   130→function cartKey(c: CartItem): string {
+   131→  return `${c.itemType}:${c.refId}`;
+   132→}
+   133→function lineTotal(c: CartItem): number {
+   134→  return c.quantity * c.unitPrice;
+   135→}
+   136→function itemCount(s: Sale): number {
+   137→  return s.items.length;
+   138→}
+   139→
+   140→const PERIOD_LABELS: Record<PeriodKey, string> = {
+   141→  today: "Aujourd'hui",
+   142→  week: "Cette semaine",
+   143→  month: "Ce mois",
+   144→  year: "Cette année",
+   145→  custom: "Période personnalisée",
+   146→};
+   147→
+   148→/* ------------------------------------------------------------------ */
+   149→/* Bouton article (catalogue POS)                                      */
+   150→/* ------------------------------------------------------------------ */
+   151→
+   152→interface ItemButtonProps {
+   153→  name: string;
+   154→  price: number;
+   155→  photo?: string | null;
+   156→  icon: React.ReactNode;
+   157→  hint?: string;
+   158→  onClick: () => void;
+   159→}
+   160→
+   161→function ItemButton({ name, price, photo, icon, hint, onClick }: ItemButtonProps) {
+   162→  return (
+   163→    <button
+   164→      type="button"
+   165→      onClick={onClick}
+   166→      className="group flex flex-col overflow-hidden rounded-lg border bg-card text-left transition-all hover:-translate-y-0.5 hover:border-primary/60 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   167→    >
+   168→      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+   169→        {photo ? (
+   170→          <img
+   171→            src={photoUrl(photo)}
+   172→            alt={name}
+   173→            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+   174→          />
+   175→        ) : (
+   176→          <div className="flex h-full items-center justify-center text-muted-foreground/60">
+   177→            {icon}
+   178→          </div>
+   179→        )}
+   180→      </div>
+   181→      <div className="flex flex-1 flex-col gap-1 p-2.5">
+   182→        <div className="line-clamp-2 text-sm font-medium leading-tight">{name}</div>
+   183→        <div className="mt-auto flex items-center justify-between gap-2">
+   184→          <span className="text-sm font-bold text-primary">{formatMoney(price)}</span>
+   185→          {hint && <span className="text-[10px] text-muted-foreground">{hint}</span>}
+   186→        </div>
+   187→      </div>
+   188→    </button>
+   189→  );
+   190→}
+   191→
+   192→/* ------------------------------------------------------------------ */
+   193→/* Panneau panier (réutilisé en colonne et dans le Sheet mobile)       */
+   194→/* ------------------------------------------------------------------ */
+   195→
+   196→interface CartPanelProps {
+   197→  cart: CartItem[];
+   198→  note: string;
+   199→  submitting: boolean;
+   200→  onNoteChange: (v: string) => void;
+   201→  onInc: (key: string) => void;
+   202→  onDec: (key: string) => void;
+   203→  onRemove: (key: string) => void;
+   204→  onPriceChange: (key: string, v: number) => void;
+   205→  onClear: () => void;
+   206→  onSubmit: () => void;
+   207→  variant?: "inline" | "sheet";
+   208→}
+   209→
+   210→function CartPanel({
+   211→  cart,
+   212→  note,
+   213→  submitting,
+   214→  onNoteChange,
+   215→  onInc,
+   216→  onDec,
+   217→  onRemove,
+   218→  onPriceChange,
+   219→  onClear,
+   220→  onSubmit,
+   221→  variant = "inline",
+   222→}: CartPanelProps) {
+   223→  const total = cart.reduce((s, c) => s + lineTotal(c), 0);
+   224→  const totalQty = cart.reduce((s, c) => s + c.quantity, 0);
+   225→
+   226→  return (
+   227→    <Card className="flex h-full flex-col">
+   228→      <CardHeader className="pb-3">
+   229→        <div className="flex items-center justify-between gap-2">
+   230→          <CardTitle className="flex items-center gap-2 text-base">
+   231→            <ShoppingCart className="h-4 w-4 text-primary" />
+   232→            Panier
+   233→            {cart.length > 0 && (
+   234→              <Badge variant="secondary" className="font-mono tabular-nums">
+   235→                {formatNumber(totalQty)}
+   236→              </Badge>
+   237→            )}
+   238→          </CardTitle>
+   239→          {cart.length > 0 && (
+   240→            <Button
+   241→              variant="ghost"
+   242→              size="sm"
+   243→              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+   244→              onClick={onClear}
+   245→            >
+   246→              <Trash2 className="h-3.5 w-3.5" />
+   247→              Vider
+   248→            </Button>
+   249→          )}
+   250→        </div>
+   251→      </CardHeader>
+   252→      <CardContent className="flex flex-1 flex-col gap-3 overflow-hidden">
+   253→        {cart.length === 0 ? (
+   254→          <EmptyState
+   255→            title="Panier vide"
+   256→            description="Ajoutez des plats, boissons ou produits pour composer une vente."
+   257→            className="flex-1 py-8"
+   258→            icon={<ShoppingCart className="h-6 w-6" />}
+   259→          />
+   260→        ) : (
+   261→          <ScrollArea
+   262→            className={cn(
+   263→              "flex-1 pr-2",
+   264→              variant === "inline" ? "max-h-[44vh] lg:max-h-[52vh]" : "max-h-[52vh]",
+   265→            )}
+   266→          >
+   267→            <ul className="space-y-2">
+   268→              {cart.map((c) => {
+   269→                const k = cartKey(c);
+   270→                return (
+   271→                  <li key={k} className="rounded-lg border bg-card/60 p-2.5">
+   272→                    <div className="flex items-start gap-2">
+   273→                      <div className="min-w-0 flex-1">
+   274→                        <p className="truncate text-sm font-medium">{c.itemName}</p>
+   275→                        <p className="text-xs text-muted-foreground">
+   276→                          {formatNumber(c.quantity)} × {formatMoney(c.unitPrice)}
+   277→                        </p>
+   278→                      </div>
+   279→                      <Button
+   280→                        variant="ghost"
+   281→                        size="icon"
+   282→                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+   283→                        onClick={() => onRemove(k)}
+   284→                      >
+   285→                        <X className="h-3.5 w-3.5" />
+   286→                      </Button>
+   287→                    </div>
+   288→                    <div className="mt-2 flex items-center gap-2">
+   289→                      <div className="flex items-center rounded-md border">
+   290→                        <Button
+   291→                          variant="ghost"
+   292→                          size="icon"
+   293→                          className="h-7 w-7"
+   294→                          onClick={() => onDec(k)}
+   295→                          disabled={c.quantity <= 1}
+   296→                        >
+   297→                          <Minus className="h-3.5 w-3.5" />
+   298→                        </Button>
+   299→                        <span className="w-8 text-center text-sm font-mono tabular-nums">
+   300→                          {formatNumber(c.quantity)}
+   301→                        </span>
+   302→                        <Button
+   303→                          variant="ghost"
+   304→                          size="icon"
+   305→                          className="h-7 w-7"
+   306→                          onClick={() => onInc(k)}
+   307→                        >
+   308→                          <Plus className="h-3.5 w-3.5" />
+   309→                        </Button>
+   310→                      </div>
+   311→                      <Input
+   312→                        type="number"
+   313→                        min={0}
+   314→                        step="any"
+   315→                        value={c.unitPrice}
+   316→                        onChange={(e) => onPriceChange(k, Number(e.target.value) || 0)}
+   317→                        className="ml-auto h-8 w-28 text-right text-sm tabular-nums"
+   318→                        aria-label="Prix unitaire"
+   319→                      />
+   320→                      <div className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums">
+   321→                        {formatMoney(lineTotal(c))}
+   322→                      </div>
+   323→                    </div>
+   324→                  </li>
+   325→                );
+   326→              })}
+   327→            </ul>
+   328→          </ScrollArea>
+   329→        )}
+   330→
+   331→        <div className="space-y-3 border-t pt-3">
+   332→          <div>
+   333→            <Label htmlFor="sale-note" className="text-xs text-muted-foreground">
+   334→              Note (optionnel)
+   335→            </Label>
+   336→            <Textarea
+   337→              id="sale-note"
+   338→              value={note}
+   339→              onChange={(e) => onNoteChange(e.target.value)}
+   340→              placeholder="Client, table, observation…"
+   341→              className="mt-1 min-h-[60px] resize-none text-sm"
+   342→              rows={2}
+   343→            />
+   344→          </div>
+   345→          <div className="flex items-center justify-between rounded-lg bg-primary/5 px-3 py-2.5">
+   346→            <span className="text-sm font-medium text-muted-foreground">Total</span>
+   347→            <span className="text-xl font-bold tabular-nums text-primary">
+   348→              {formatMoney(total)}
+   349→            </span>
+   350→          </div>
+   351→          <Button
+   352→            className="w-full"
+   353→            size="lg"
+   354→            onClick={onSubmit}
+   355→            disabled={cart.length === 0 || submitting}
+   356→          >
+   357→            {submitting ? (
+   358→              <Loader2 className="h-4 w-4 animate-spin" />
+   359→            ) : (
+   360→              <Receipt className="h-4 w-4" />
+   361→            )}
+   362→            Enregistrer la vente
+   363→          </Button>
+   364→        </div>
+   365→      </CardContent>
+   366→    </Card>
+   367→  );
+   368→}
+   369→
+   370→/* ------------------------------------------------------------------ */
+   371→/* Grille de squelettes (chargement catalogue)                         */
+   372→/* ------------------------------------------------------------------ */
+   373→
+   374→function SkeletonGrid() {
+   375→  return (
+   376→    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+   377→      {Array.from({ length: 8 }).map((_, i) => (
+   378→        <div key={i} className="overflow-hidden rounded-lg border">
+   379→          <Skeleton className="aspect-[4/3] w-full rounded-none" />
+   380→          <div className="space-y-2 p-2.5">
+   381→            <Skeleton className="h-4 w-3/4" />
+   382→            <Skeleton className="h-4 w-1/2" />
+   383→          </div>
+   384→        </div>
+   385→      ))}
+   386→    </div>
+   387→  );
+   388→}
+   389→
+   390→/* ------------------------------------------------------------------ */
+   391→/* Onglet « Nouvelle vente » (caisse / POS)                            */
+   392→/* ------------------------------------------------------------------ */
+   393→
+   394→interface POSPanelProps {
+   395→  onSaleSaved: () => void;
+   396→}
+   397→
+   398→function POSPanel({ onSaleSaved }: POSPanelProps) {
+   399→  const [products, setProducts] = useState<Product[]>([]);
+   400→  const [dishes, setDishes] = useState<Dish[]>([]);
+   401→  const [drinks, setDrinks] = useState<Drink[]>([]);
+   402→  const [loading, setLoading] = useState(true);
+   403→  const [posTab, setPosTab] = useState<string>("dishes");
+   404→  const [search, setSearch] = useState("");
+   405→  const [cart, setCart] = useState<CartItem[]>([]);
+   406→  const [note, setNote] = useState("");
+   407→  const [submitting, setSubmitting] = useState(false);
+   408→  const [mobileCartOpen, setMobileCartOpen] = useState(false);
+   409→
+   410→  const loadCatalog = useCallback(async () => {
+   411→    try {
+   412→      setLoading(true);
+   413→      const [p, d, dr] = await Promise.all([
+   414→        apiFetch<Product[]>("/api/products?available=true"),
+   415→        apiFetch<Dish[]>("/api/dishes"),
+   416→        apiFetch<Drink[]>("/api/drinks"),
+   417→      ]);
+   418→      setProducts(p);
+   419→      setDishes(d.filter((x) => x.available !== false));
+   420→      setDrinks(dr.filter((x) => x.available !== false));
+   421→    } catch (err) {
+   422→      toast.error(
+   423→        err instanceof Error ? err.message : "Impossible de charger le catalogue",
+   424→      );
+   425→    } finally {
+   426→      setLoading(false);
+   427→    }
+   428→  }, []);
+   429→
+   430→  useEffect(() => {
+   431→    loadCatalog();
+   432→  }, [loadCatalog]);
+   433→
+   434→  const filteredDishes = useMemo(() => {
+   435→    const q = search.trim().toLowerCase();
+   436→    if (!q) return dishes;
+   437→    return dishes.filter((d) => d.name.toLowerCase().includes(q));
+   438→  }, [dishes, search]);
+   439→
+   440→  const filteredDrinks = useMemo(() => {
+   441→    const q = search.trim().toLowerCase();
+   442→    if (!q) return drinks;
+   443→    return drinks.filter((d) => d.name.toLowerCase().includes(q));
+   444→  }, [drinks, search]);
+   445→
+   446→  const filteredProducts = useMemo(() => {
+   447→    const q = search.trim().toLowerCase();
+   448→    if (!q) return products;
+   449→    return products.filter((p) => p.name.toLowerCase().includes(q));
+   450→  }, [products, search]);
+   451→
+   452→  const addToCart = useCallback((item: CartItem) => {
+   453→    setCart((prev) => {
+   454→      const k = cartKey(item);
+   455→      const idx = prev.findIndex((c) => cartKey(c) === k);
+   456→      if (idx >= 0) {
+   457→        const next = [...prev];
+   458→        next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
+   459→        return next;
+   460→      }
+   461→      return [...prev, item];
+   462→    });
+   463→  }, []);
+   464→
+   465→  const inc = (key: string) =>
+   466→    setCart((prev) =>
+   467→      prev.map((c) => (cartKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c)),
+   468→    );
+   469→  const dec = (key: string) =>
+   470→    setCart((prev) =>
+   471→      prev.map((c) =>
+   472→        cartKey(c) === key ? { ...c, quantity: Math.max(1, c.quantity - 1) } : c,
+   473→      ),
+   474→    );
+   475→  const removeItem = (key: string) =>
+   476→    setCart((prev) => prev.filter((c) => cartKey(c) !== key));
+   477→  const priceChange = (key: string, v: number) =>
+   478→    setCart((prev) =>
+   479→      prev.map((c) => (cartKey(c) === key ? { ...c, unitPrice: Math.max(0, v) } : c)),
+   480→    );
+   481→  const clear = () => {
+   482→    setCart([]);
+   483→    setNote("");
+   484→  };
+   485→
+   486→  const submit = async () => {
+   487→    if (cart.length === 0) return;
+   488→    setSubmitting(true);
+   489→    try {
+   490→      const items = cart.map((c) => {
+   491→        const base: Record<string, unknown> = {
+   492→          itemType: c.itemType,
+   493→          itemName: c.itemName,
+   494→          quantity: c.quantity,
+   495→          unitPrice: c.unitPrice,
+   496→          total: lineTotal(c),
+   497→        };
+   498→        if (c.itemType === "product") base.productId = c.refId;
+   499→        else if (c.itemType === "dish") base.dishId = c.refId;
+   500→        else base.drinkId = c.refId;
+   501→        return base;
+   502→      });
+   503→      await apiFetch("/api/sales", {
+   504→        method: "POST",
+   505→        body: JSON.stringify({ note: note.trim() || undefined, items }),
+   506→      });
+   507→      toast.success("Vente enregistrée avec succès");
+   508→      clear();
+   509→      setMobileCartOpen(false);
+   510→      onSaleSaved();
+   511→    } catch (err) {
+   512→      toast.error(
+   513→        err instanceof Error ? err.message : "Erreur lors de l'enregistrement",
+   514→      );
+   515→    } finally {
+   516→      setSubmitting(false);
+   517→    }
+   518→  };
+   519→
+   520→  const cartProps: CartPanelProps = {
+   521→    cart,
+   522→    note,
+   523→    submitting,
+   524→    onNoteChange: setNote,
+   525→    onInc: inc,
+   526→    onDec: dec,
+   527→    onRemove: removeItem,
+   528→    onPriceChange: priceChange,
+   529→    onClear: clear,
+   530→    onSubmit: submit,
+   531→  };
+   532→
+   533→  const totalQty = cart.reduce((s, c) => s + c.quantity, 0);
+   534→
+   535→  return (
+   536→    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+   537→      {/* Catalogue (colonne gauche) */}
+   538→      <div className="lg:col-span-2">
+   539→        <Card>
+   540→          <CardHeader className="pb-3">
+   541→            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   542→              <CardTitle className="text-base">Catalogue</CardTitle>
+   543→              <div className="relative w-full sm:max-w-xs">
+   544→                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   545→                <Input
+   546→                  value={search}
+   547→                  onChange={(e) => setSearch(e.target.value)}
+   548→                  placeholder="Rechercher un article…"
+   549→                  className="pl-9"
+   550→                />
+   551→              </div>
+   552→            </div>
+   553→          </CardHeader>
+   554→          <CardContent>
+   555→            <Tabs value={posTab} onValueChange={setPosTab}>
+   556→              <TabsList className="grid w-full grid-cols-3 sm:inline-flex sm:w-auto">
+   557→                <TabsTrigger value="dishes">
+   558→                  <UtensilsCrossed className="h-4 w-4" />
+   559→                  <span className="hidden sm:inline">Plats</span>
+   560→                  <Badge variant="secondary" className="ml-1 font-mono">
+   561→                    {dishes.length}
+   562→                  </Badge>
+   563→                </TabsTrigger>
+   564→                <TabsTrigger value="drinks">
+   565→                  <Wine className="h-4 w-4" />
+   566→                  <span className="hidden sm:inline">Boissons</span>
+   567→                  <Badge variant="secondary" className="ml-1 font-mono">
+   568→                    {drinks.length}
+   569→                  </Badge>
+   570→                </TabsTrigger>
+   571→                <TabsTrigger value="products">
+   572→                  <Package className="h-4 w-4" />
+   573→                  <span className="hidden sm:inline">Produits</span>
+   574→                  <Badge variant="secondary" className="ml-1 font-mono">
+   575→                    {products.length}
+   576→                  </Badge>
+   577→                </TabsTrigger>
+   578→              </TabsList>
+   579→
+   580→              <TabsContent value="dishes" className="mt-4">
+   581→                {loading ? (
+   582→                  <SkeletonGrid />
+   583→                ) : filteredDishes.length === 0 ? (
+   584→                  <EmptyState
+   585→                    title="Aucun plat disponible"
+   586→                    description="Ajoutez des plats dans le module Plats ou ajustez votre recherche."
+   587→                    icon={<UtensilsCrossed className="h-6 w-6" />}
+   588→                  />
+   589→                ) : (
+   590→                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+   591→                    {filteredDishes.map((d) => (
+   592→                      <ItemButton
+   593→                        key={d.id}
+   594→                        name={d.name}
+   595→                        price={d.price}
+   596→                        photo={d.photo}
+   597→                        icon={<UtensilsCrossed className="h-8 w-8" />}
+   598→                        onClick={() =>
+   599→                          addToCart({
+   600→                            itemType: "dish",
+   601→                            refId: d.id,
+   602→                            itemName: d.name,
+   603→                            quantity: 1,
+   604→                            unitPrice: d.price,
+   605→                            photo: d.photo,
+   606→                          })
+   607→                        }
+   608→                      />
+   609→                    ))}
+   610→                  </div>
+   611→                )}
+   612→              </TabsContent>
+   613→
+   614→              <TabsContent value="drinks" className="mt-4">
+   615→                {loading ? (
+   616→                  <SkeletonGrid />
+   617→                ) : filteredDrinks.length === 0 ? (
+   618→                  <EmptyState
+   619→                    title="Aucune boisson disponible"
+   620→                    description="Ajoutez des boissons dans le module Boissons ou ajustez votre recherche."
+   621→                    icon={<Wine className="h-6 w-6" />}
+   622→                  />
+   623→                ) : (
+   624→                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+   625→                    {filteredDrinks.map((d) => (
+   626→                      <ItemButton
+   627→                        key={d.id}
+   628→                        name={d.name}
+   629→                        price={d.price}
+   630→                        photo={d.photo}
+   631→                        icon={<Wine className="h-8 w-8" />}
+   632→                        onClick={() =>
+   633→                          addToCart({
+   634→                            itemType: "drink",
+   635→                            refId: d.id,
+   636→                            itemName: d.name,
+   637→                            quantity: 1,
+   638→                            unitPrice: d.price,
+   639→                            photo: d.photo,
+   640→                          })
+   641→                        }
+   642→                      />
+   643→                    ))}
+   644→                  </div>
+   645→                )}
+   646→              </TabsContent>
+   647→
+   648→              <TabsContent value="products" className="mt-4">
+   649→                {loading ? (
+   650→                  <SkeletonGrid />
+   651→                ) : filteredProducts.length === 0 ? (
+   652→                  <EmptyState
+   653→                    title="Aucun produit disponible"
+   654→                    description="Ajoutez des produits dans le module Produits ou ajustez votre recherche."
+   655→                    icon={<Package className="h-6 w-6" />}
+   656→                  />
+   657→                ) : (
+   658→                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+   659→                    {filteredProducts.map((p) => (
+   660→                      <ItemButton
+   661→                        key={p.id}
+   662→                        name={p.name}
+   663→                        price={p.salePrice}
+   664→                        photo={p.photo}
+   665→                        icon={<Package className="h-8 w-8" />}
+   666→                        hint={p.unit ? `en ${p.unit}` : undefined}
+   667→                        onClick={() =>
+   668→                          addToCart({
+   669→                            itemType: "product",
+   670→                            refId: p.id,
+   671→                            itemName: p.name,
+   672→                            quantity: 1,
+   673→                            unitPrice: p.salePrice,
+   674→                            photo: p.photo,
+   675→                          })
+   676→                        }
+   677→                      />
+   678→                    ))}
+   679→                  </div>
+   680→                )}
+   681→              </TabsContent>
+   682→            </Tabs>
+   683→          </CardContent>
+   684→        </Card>
+   685→      </div>
+   686→
+   687→      {/* Panier — colonne droite (desktop) */}
+   688→      <div className="hidden lg:col-span-1 lg:block">
+   689→        <div className="sticky top-4">
+   690→          <CartPanel {...cartProps} />
+   691→        </div>
+   692→      </div>
+   693→
+   694→      {/* Bouton flottant + Sheet panier (mobile) */}
+   695→      <Sheet open={mobileCartOpen} onOpenChange={setMobileCartOpen}>
+   696→        <SheetTrigger asChild>
+   697→          <Button
+   698→            size="lg"
+   699→            className="fixed bottom-4 right-4 z-40 h-14 gap-2 rounded-full px-5 shadow-lg lg:hidden"
+   700→          >
+   701→            <ShoppingCart className="h-5 w-5" />
+   702→            Panier
+   703→            {totalQty > 0 && (
+   704→              <Badge className="bg-background text-primary hover:bg-background">
+   705→                {formatNumber(totalQty)}
+   706→              </Badge>
+   707→            )}
+   708→          </Button>
+   709→        </SheetTrigger>
+   710→        <SheetContent side="bottom" className="flex max-h-[92vh] flex-col gap-0 p-0">
+   711→          <SheetHeader className="border-b">
+   712→            <SheetTitle className="flex items-center gap-2">
+   713→              <ShoppingCart className="h-4 w-4 text-primary" />
+   714→              Panier ({formatNumber(totalQty)})
+   715→            </SheetTitle>
+   716→          </SheetHeader>
+   717→          <div className="flex-1 overflow-y-auto p-3">
+   718→            <CartPanel {...cartProps} variant="sheet" />
+   719→          </div>
+   720→        </SheetContent>
+   721→      </Sheet>
+   722→    </div>
+   723→  );
+   724→}
+   725→
+   726→/* ------------------------------------------------------------------ */
+   727→/* Onglet « Historique »                                               */
+   728→/* ------------------------------------------------------------------ */
+   729→
+   730→interface HistoryPanelProps {
+   731→  refreshKey: number;
+   732→}
+   733→
+   734→function HistoryPanel({ refreshKey }: HistoryPanelProps) {
+   735→  const [sales, setSales] = useState<Sale[]>([]);
+   736→  const [loading, setLoading] = useState(true);
+   737→  const [period, setPeriod] = useState<PeriodKey>("today");
+   738→  const [from, setFrom] = useState("");
+   739→  const [to, setTo] = useState("");
+   740→  const [detailSale, setDetailSale] = useState<Sale | null>(null);
+   741→
+   742→  const load = useCallback(async () => {
+   743→    try {
+   744→      setLoading(true);
+   745→      const params = new URLSearchParams();
+   746→      if (period === "custom") {
+   747→        if (from) params.set("from", from);
+   748→        if (to) params.set("to", to);
+   749→      } else {
+   750→        params.set("period", period);
+   751→      }
+   752→      const qs = params.toString();
+   753→      const result = await apiFetch<Sale[]>(`/api/sales${qs ? `?${qs}` : ""}`);
+   754→      setSales(result);
+   755→    } catch (err) {
+   756→      toast.error(
+   757→        err instanceof Error ? err.message : "Impossible de charger l'historique",
+   758→      );
+   759→    } finally {
+   760→      setLoading(false);
+   761→    }
+   762→  }, [period, from, to]);
+   763→
+   764→  useEffect(() => {
+   765→    load();
+   766→  }, [load, refreshKey]);
+   767→
+   768→  const totalRevenue = sales.reduce((s, x) => s + (x.totalAmount || 0), 0);
+   769→  const salesCount = sales.length;
+   770→  const avg = salesCount > 0 ? totalRevenue / salesCount : 0;
+   771→
+   772→  const exportRows = (): (string | number)[][] =>
+   773→    sales.map((s) => [formatDateTime(s.date), itemCount(s), s.totalAmount]);
+   774→
+   775→  const handleCSV = () => {
+   776→    if (sales.length === 0) {
+   777→      toast.info("Aucune vente à exporter");
+   778→      return;
+   779→    }
+   780→    downloadCSV("ventes", ["Date", "Articles", "Total (FCFA)"], exportRows());
+   781→  };
+   782→  const handleExcel = () => {
+   783→    if (sales.length === 0) {
+   784→      toast.info("Aucune vente à exporter");
+   785→      return;
+   786→    }
+   787→    downloadExcel("ventes", "Ventes", ["Date", "Articles", "Total (FCFA)"], exportRows());
+   788→  };
+   789→  const handlePDF = () => {
+   790→    if (sales.length === 0) {
+   791→      toast.info("Aucune vente à exporter");
+   792→      return;
+   793→    }
+   794→    const cards = `
+   795→      <div class="grid">
+   796→        <div class="card"><div class="l">Revenu total</div><div class="v">${formatMoney(totalRevenue)}</div></div>
+   797→        <div class="card"><div class="l">Nombre de ventes</div><div class="v">${salesCount}</div></div>
+   798→        <div class="card"><div class="l">Panier moyen</div><div class="v">${formatMoney(avg)}</div></div>
+   799→      </div>`;
+   800→    const rows = sales
+   801→      .map(
+   802→        (s) =>
+   803→          `<tr><td>${formatDateTime(s.date)}</td><td>${itemCount(s)}</td><td style="text-align:right">${formatMoney(s.totalAmount)}</td></tr>`,
+   804→      )
+   805→      .join("");
+   806→    const table = `
+   807→      <table>
+   808→        <thead><tr><th>Date</th><th>Articles</th><th style="text-align:right">Total</th></tr></thead>
+   809→        <tbody>
+   810→          ${rows}
+   811→          <tr class="total"><td colspan="2">Total général</td><td style="text-align:right">${formatMoney(totalRevenue)}</td></tr>
+   812→        </tbody>
+   813→      </table>`;
+   814→    printHTML("Revenus — Ventes", cards + table);
+   815→  };
+   816→
+   817→  return (
+   818→    <div className="space-y-4">
+   819→      {/* Filtres + exports */}
+   820→      <Card>
+   821→        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end sm:flex-wrap">
+   822→          <div className="flex flex-col gap-1.5">
+   823→            <Label className="text-xs text-muted-foreground">Période</Label>
+   824→            <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
+   825→              <SelectTrigger className="w-[200px]">
+   826→                <SelectValue />
+   827→              </SelectTrigger>
+   828→              <SelectContent>
+   829→                <SelectItem value="today">Aujourd&apos;hui</SelectItem>
+   830→                <SelectItem value="week">Cette semaine</SelectItem>
+   831→                <SelectItem value="month">Ce mois</SelectItem>
+   832→                <SelectItem value="year">Cette année</SelectItem>
+   833→                <SelectItem value="custom">Personnalisé</SelectItem>
+   834→              </SelectContent>
+   835→            </Select>
+   836→          </div>
+   837→          {period === "custom" && (
+   838→            <>
+   839→              <div className="flex flex-col gap-1.5">
+   840→                <Label className="text-xs text-muted-foreground">Du</Label>
+   841→                <Input
+   842→                  type="date"
+   843→                  value={from}
+   844→                  onChange={(e) => setFrom(e.target.value)}
+   845→                  className="w-[170px]"
+   846→                />
+   847→              </div>
+   848→              <div className="flex flex-col gap-1.5">
+   849→                <Label className="text-xs text-muted-foreground">Au</Label>
+   850→                <Input
+   851→                  type="date"
+   852→                  value={to}
+   853→                  onChange={(e) => setTo(e.target.value)}
+   854→                  className="w-[170px]"
+   855→                />
+   856→              </div>
+   857→            </>
+   858→          )}
+   859→          <Button
+   860→            variant="outline"
+   861→            size="sm"
+   862→            onClick={() => load()}
+   863→            disabled={loading}
+   864→            className="sm:ml-auto"
+   865→          >
+   866→            <RotateCw className={cn("h-4 w-4", loading && "animate-spin")} />
+   867→            Actualiser
+   868→          </Button>
+   869→          <div className="flex flex-wrap items-center gap-2">
+   870→            <Button variant="outline" size="sm" onClick={handleCSV}>
+   871→              <FileDown className="h-4 w-4" />
+   872→              CSV
+   873→            </Button>
+   874→            <Button variant="outline" size="sm" onClick={handleExcel}>
+   875→              <FileSpreadsheet className="h-4 w-4" />
+   876→              Excel
+   877→            </Button>
+   878→            <Button variant="outline" size="sm" onClick={handlePDF}>
+   879→              <Printer className="h-4 w-4" />
+   880→              PDF
+   881→            </Button>
+   882→          </div>
+   883→        </CardContent>
+   884→      </Card>
+   885→
+   886→      {/* Statistiques période */}
+   887→      {loading ? (
+   888→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   889→          {Array.from({ length: 3 }).map((_, i) => (
+   890→            <Skeleton key={i} className="h-28 w-full" />
+   891→          ))}
+   892→        </div>
+   893→      ) : (
+   894→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   895→          <StatCard
+   896→            label="Revenu total"
+   897→            value={formatMoney(totalRevenue)}
+   898→            icon={<TrendingUp className="h-5 w-5" />}
+   899→            tone="primary"
+   900→            hint={PERIOD_LABELS[period]}
+   901→          />
+   902→          <StatCard
+   903→            label="Nombre de ventes"
+   904→            value={salesCount}
+   905→            icon={<ShoppingBag className="h-5 w-5" />}
+   906→            tone="default"
+   907→            hint={PERIOD_LABELS[period]}
+   908→          />
+   909→          <StatCard
+   910→            label="Panier moyen"
+   911→            value={formatMoney(avg)}
+   912→            icon={<Wallet className="h-5 w-5" />}
+   913→            tone="warning"
+   914→            hint={PERIOD_LABELS[period]}
+   915→          />
+   916→        </div>
+   917→      )}
+   918→
+   919→      {/* Liste des ventes */}
+   920→      <Card>
+   921→        <CardHeader className="pb-3">
+   922→          <CardTitle className="text-base">Ventes ({sales.length})</CardTitle>
+   923→        </CardHeader>
+   924→        <CardContent>
+   925→          {loading ? (
+   926→            <div className="space-y-2">
+   927→              {Array.from({ length: 4 }).map((_, i) => (
+   928→                <Skeleton key={i} className="h-16 w-full" />
+   929→              ))}
+   930→            </div>
+   931→          ) : sales.length === 0 ? (
+   932→            <EmptyState
+   933→              title="Aucune vente sur cette période"
+   934→              description="Changez la période ou enregistrez une nouvelle vente depuis l'onglet « Nouvelle vente »."
+   935→              icon={<Receipt className="h-6 w-6" />}
+   936→            />
+   937→          ) : (
+   938→            <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+   939→              {sales.map((s) => {
+   940→                const count = itemCount(s);
+   941→                return (
+   942→                  <div
+   943→                    key={s.id}
+   944→                    className="flex flex-col gap-2 rounded-lg border bg-card/50 p-3 sm:flex-row sm:items-center"
+   945→                  >
+   946→                    <div className="min-w-0 flex-1">
+   947→                      <div className="flex flex-wrap items-center gap-2">
+   948→                        <span className="text-sm font-medium">
+   949→                          {formatDateTime(s.date)}
+   950→                        </span>
+   951→                        <Badge variant="secondary" className="font-mono">
+   952→                          {count} article{count > 1 ? "s" : ""}
+   953→                        </Badge>
+   954→                      </div>
+   955→                      {s.note && (
+   956→                        <p className="mt-1 truncate text-xs text-muted-foreground">
+   957→                          « {s.note} »
+   958→                        </p>
+   959→                      )}
+   960→                    </div>
+   961→                    <div className="flex items-center gap-2">
+   962→                      <span className="text-base font-bold tabular-nums text-primary">
+   963→                        {formatMoney(s.totalAmount)}
+   964→                      </span>
+   965→                      <Button
+   966→                        variant="outline"
+   967→                        size="sm"
+   968→                        onClick={() => setDetailSale(s)}
+   969→                      >
+   970→                        <Eye className="h-4 w-4" />
+   971→                        <span className="hidden sm:inline">Détail</span>
+   972→                      </Button>
+   973→                      <ConfirmDialog
+   974→                        title="Supprimer cette vente ?"
+   975→                        description="Le stock des produits vendus sera rétabli. Cette action est irréversible."
+   976→                        confirmText="Supprimer"
+   977→                        trigger={
+   978→                          <Button
+   979→                            variant="outline"
+   980→                            size="sm"
+   981→                            className="text-destructive hover:text-destructive"
+   982→                          >
+   983→                            <Trash2 className="h-4 w-4" />
+   984→                            <span className="hidden sm:inline">Supprimer</span>
+   985→                          </Button>
+   986→                        }
+   987→                        onConfirm={async () => {
+   988→                          try {
+   989→                            await apiFetch(`/api/sales/${s.id}`, { method: "DELETE" });
+   990→                            toast.success("Vente supprimée. Stock des produits rétabli.");
+   991→                            load();
+   992→                          } catch (err) {
+   993→                            toast.error(
+   994→                              err instanceof Error
+   995→                                ? err.message
+   996→                                : "Erreur lors de la suppression",
+   997→                            );
+   998→                          }
+   999→                        }}
+  1000→                      />
+  1001→                    </div>
+  1002→                  </div>
+  1003→                );
+  1004→              })}
+  1005→            </div>
+  1006→          )}
+  1007→        </CardContent>
+  1008→      </Card>
+  1009→
+  1010→      {/* Dialogue détail */}
+  1011→      <Dialog
+  1012→        open={!!detailSale}
+  1013→        onOpenChange={(o) => !o && setDetailSale(null)}
+  1014→      >
+  1015→        <DialogContent className="sm:max-w-lg">
+  1016→          <DialogHeader>
+  1017→            <DialogTitle className="flex items-center gap-2">
+  1018→              <Receipt className="h-5 w-5 text-primary" />
+  1019→              Détail de la vente
+  1020→            </DialogTitle>
+  1021→            <DialogDescription>
+  1022→              {detailSale && formatDateTime(detailSale.date)}
+  1023→            </DialogDescription>
+  1024→          </DialogHeader>
+  1025→          {detailSale && (
+  1026→            <div className="space-y-3">
+  1027→              {detailSale.note && (
+  1028→                <div className="rounded-md bg-muted/40 p-2.5 text-sm">
+  1029→                  <span className="text-xs font-medium uppercase text-muted-foreground">
+  1030→                    Note
+  1031→                  </span>
+  1032→                  <p className="mt-0.5">{detailSale.note}</p>
+  1033→                </div>
+  1034→              )}
+  1035→              <div className="rounded-md border">
+  1036→                <Table>
+  1037→                  <TableHeader>
+  1038→                    <TableRow>
+  1039→                      <TableHead>Article</TableHead>
+  1040→                      <TableHead className="text-right">Qté</TableHead>
+  1041→                      <TableHead className="text-right">P.U.</TableHead>
+  1042→                      <TableHead className="text-right">Total</TableHead>
+  1043→                    </TableRow>
+  1044→                  </TableHeader>
+  1045→                  <TableBody>
+  1046→                    {detailSale.items.map((it) => (
+  1047→                      <TableRow key={it.id}>
+  1048→                        <TableCell className="font-medium">{it.itemName}</TableCell>
+  1049→                        <TableCell className="text-right tabular-nums">
+  1050→                          {formatNumber(it.quantity)}
+  1051→                        </TableCell>
+  1052→                        <TableCell className="text-right tabular-nums">
+  1053→                          {formatMoney(it.unitPrice)}
+  1054→                        </TableCell>
+  1055→                        <TableCell className="text-right font-medium tabular-nums">
+  1056→                          {formatMoney(it.total)}
+  1057→                        </TableCell>
+  1058→                      </TableRow>
+  1059→                    ))}
+  1060→                    <TableRow>
+  1061→                      <TableCell colSpan={3} className="text-right font-semibold">
+  1062→                        Total
+  1063→                      </TableCell>
+  1064→                      <TableCell className="text-right font-bold tabular-nums text-primary">
+  1065→                        {formatMoney(detailSale.totalAmount)}
+  1066→                      </TableCell>
+  1067→                    </TableRow>
+  1068→                  </TableBody>
+  1069→                </Table>
+  1070→              </div>
+  1071→            </div>
+  1072→          )}
+  1073→        </DialogContent>
+  1074→      </Dialog>
+  1075→    </div>
+  1076→  );
+  1077→}
+  1078→
+  1079→/* ------------------------------------------------------------------ */
+  1080→/* Module principal                                                    */
+  1081→/* ------------------------------------------------------------------ */
+  1082→
+  1083→export function SalesModule() {
+  1084→  const [mainTab, setMainTab] = useState<string>("pos");
+  1085→  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  1086→
+  1087→  const handleSaleSaved = useCallback(() => {
+  1088→    setHistoryRefreshKey((k) => k + 1);
+  1089→    setMainTab("history");
+  1090→  }, []);
+  1091→
+  1092→  return (
+  1093→    <div className="space-y-6">
+  1094→      <PageHeader
+  1095→        title="Ventes"
+  1096→        description="Encaissez les ventes en caisse et consultez l'historique des revenus"
+  1097→        icon={<Receipt className="h-5 w-5" />}
+  1098→      />
+  1099→      <Tabs value={mainTab} onValueChange={setMainTab}>
+  1100→        <TabsList className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto">
+  1101→          <TabsTrigger value="pos">
+  1102→            <ShoppingCart className="h-4 w-4" />
+  1103→            Nouvelle vente
+  1104→          </TabsTrigger>
+  1105→          <TabsTrigger value="history">
+  1106→            <History className="h-4 w-4" />
+  1107→            Historique
+  1108→          </TabsTrigger>
+  1109→        </TabsList>
+  1110→        <TabsContent value="pos" className="mt-4">
+  1111→          <POSPanel onSaleSaved={handleSaleSaved} />
+  1112→        </TabsContent>
+  1113→        <TabsContent value="history" className="mt-4">
+  1114→          <HistoryPanel refreshKey={historyRefreshKey} />
+  1115→        </TabsContent>
+  1116→      </Tabs>
+  1117→    </div>
+  1118→  );
+  1119→}
+  1120→

@@ -1,6 +1,8 @@
 "use client";
 
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // Téléchargement CSV (généré côté client)
 export function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
@@ -20,7 +22,118 @@ export function downloadExcel(filename: string, sheetName: string, headers: stri
   triggerDownload(blob, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
 
-// Export PDF via impression du navigateur (HTML -> Print -> Save as PDF)
+// Téléchargement PDF réel (.pdf) via jsPDF — génère un fichier téléchargeable
+export interface PDFOptions {
+  title: string;
+  subtitle?: string;
+  total?: { label: string; value: string }; // ligne de total général à la fin du tableau
+  summaryCards?: { label: string; value: string }[]; // cartes KPI en haut
+}
+
+export function downloadPDF(filename: string, headers: string[], rows: (string | number)[][], options: PDFOptions) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // En-tête ELISHAMA
+  doc.setFillColor(249, 115, 22); // orange
+  doc.rect(0, 0, pageWidth, 18, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("ELISHAMA", 14, 11);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text("Restaurant", 14, 15.5);
+  // Date à droite
+  doc.setFontSize(9);
+  doc.text(new Date().toLocaleString("fr-FR"), pageWidth - 14, 11, { align: "right" });
+
+  // Titre du document
+  doc.setTextColor(30, 30, 30);
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text(options.title, 14, 28);
+
+  // Sous-titre (période / nombre de lignes)
+  if (options.subtitle) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(110, 110, 110);
+    doc.text(options.subtitle, 14, 34);
+  }
+
+  // Cartes KPI résumé (si fournies)
+  let startY = options.subtitle ? 40 : 34;
+  if (options.summaryCards && options.summaryCards.length > 0) {
+    const cardCount = options.summaryCards.length;
+    const cardWidth = (pageWidth - 28 - (cardCount - 1) * 6) / cardCount;
+    const cardHeight = 16;
+    options.summaryCards.forEach((card, i) => {
+      const x = 14 + i * (cardWidth + 6);
+      doc.setDrawColor(230, 230, 230);
+      doc.setFillColor(250, 250, 250);
+      doc.roundedRect(x, startY, cardWidth, cardHeight, 2, 2, "FD");
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      doc.setFont("helvetica", "normal");
+      doc.text(card.label.toUpperCase(), x + 3, startY + 5);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(249, 115, 22);
+      doc.text(card.value, x + 3, startY + 12);
+    });
+    startY += cardHeight + 6;
+  }
+
+  // Tableau de données
+  const tableRows = rows.map((r) => r.map((c) => String(c ?? "")));
+  // Ligne de total
+  if (options.total) {
+    const totalRow: string[] = [];
+    for (let i = 0; i < headers.length - 1; i++) totalRow.push("");
+    totalRow.push(options.total.label);
+    totalRow.push(options.total.value);
+    // Si le tableau a moins de colonnes que prévu, on ajuste
+    while (totalRow.length < headers.length) totalRow.unshift("");
+    tableRows.push(totalRow);
+  }
+
+  autoTable(doc, {
+    head: [headers.map((h) => String(h))],
+    body: tableRows,
+    startY,
+    margin: { left: 14, right: 14 },
+    styles: { fontSize: 8, cellPadding: 2, overflow: "linebreak" },
+    headStyles: { fillColor: [249, 115, 22], textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [250, 247, 244] },
+    didParseCell: (data) => {
+      // Mettre en gras la dernière ligne si c'est le total
+      if (options.total && data.row.index === tableRows.length - 1 && data.section === "body") {
+        data.cell.styles.fontStyle = "bold";
+        data.cell.styles.fillColor = [255, 247, 237];
+        data.cell.styles.textColor = [249, 115, 22];
+      }
+    },
+  });
+
+  // Pied de page
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(
+      `ELISHAMA — Gestion de Restaurant · Page ${i}/${pageCount}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 8,
+      { align: "center" },
+    );
+  }
+
+  doc.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
+}
+
+// Ouvre la boîte d'impression du navigateur (conservé pour compatibilité, mais downloadPDF est préféré)
 export function printHTML(title: string, bodyHTML: string) {
   const w = window.open("", "_blank", "width=900,height=700");
   if (!w) {

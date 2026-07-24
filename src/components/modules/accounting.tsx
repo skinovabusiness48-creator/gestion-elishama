@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
 import { cn, formatDateTime, formatMoney } from "@/lib/utils";
-import { downloadCSV, downloadExcel, printHTML } from "@/lib/export";
+import { downloadCSV, downloadExcel, downloadPDF } from "@/lib/export";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -234,28 +234,22 @@ export function AccountingModule() {
       toast.info("Aucun mouvement à exporter sur cette période");
       return;
     }
-    const profitTone = profit >= 0 ? "#059669" : "#dc2626";
-    const cards = `
-      <div class="grid">
-        <div class="card"><div class="l">Entrées</div><div class="v" style="color:#059669">${formatMoney(totalIn)}</div></div>
-        <div class="card"><div class="l">Sorties</div><div class="v" style="color:#dc2626">${formatMoney(totalOut)}</div></div>
-        <div class="card"><div class="l">Bénéfice</div><div class="v" style="color:${profitTone}">${formatMoney(profit)}</div></div>
-      </div>`;
-    const rows = movements
-      .map(
-        (m) =>
-          `<tr><td>${m.kind === "in" ? "Entrée" : "Sortie"}</td><td>${formatDateTime(m.date)}</td><td>${escapeHTML(m.label)}</td><td>${escapeHTML(m.note ?? "")}</td><td style="text-align:right; color:${m.kind === "in" ? "#059669" : "#dc2626"}; font-weight:600">${m.kind === "in" ? "+" : "−"}${formatMoney(m.amount)}</td></tr>`,
-      )
-      .join("");
-    const table = `
-      <table>
-        <thead><tr><th>Type</th><th>Date</th><th>Libellé</th><th>Détail</th><th style="text-align:right">Montant</th></tr></thead>
-        <tbody>
-          ${rows}
-          <tr class="total"><td colspan="4">Bénéfice net</td><td style="text-align:right; color:${profitTone}">${formatMoney(profit)}</td></tr>
-        </tbody>
-      </table>`;
-    printHTML(`Comptabilité — ${PERIOD_LABELS[period]}`, cards + table);
+    downloadPDF(
+      "comptabilite",
+      exportHeaders,
+      exportRows(),
+      {
+        title: `Comptabilité — ${PERIOD_LABELS[period]}`,
+        subtitle: `${movements.length} mouvement${movements.length > 1 ? "s" : ""}`,
+        summaryCards: [
+          { label: "Entrées", value: formatMoney(totalIn) },
+          { label: "Sorties", value: formatMoney(totalOut) },
+          { label: "Bénéfice", value: formatMoney(profit) },
+        ],
+        total: { label: "Bénéfice net", value: formatMoney(profit) },
+      },
+    );
+    toast.success("Export PDF « Comptabilité » téléchargé");
   }
 
   /* --------------------------- Render ---------------------------- */
@@ -510,17 +504,4 @@ export function AccountingModule() {
       )}
     </div>
   );
-}
-
-/* ------------------------------------------------------------------ */
-/* Utils locaux                                                        */
-/* ------------------------------------------------------------------ */
-
-function escapeHTML(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
